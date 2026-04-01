@@ -4718,6 +4718,7 @@ GET /api/proof?domain=mysite.com&amp;limit=10&amp;method=accept-all
     const activeIntegrations = {};
     const integrationIds = {};
     const colorValues = {};
+    var _serverCssVars = null; // preserves non-hex vars (overlay, font, shadow) across save cycles
     let updateTimer = null;
     const cc = document.getElementById('cc-preview');
     cc.previewMode = true;
@@ -6570,17 +6571,21 @@ GET /api/proof?domain=mysite.com&amp;limit=10&amp;method=accept-all
 
       var config = buildConfig();
 
-      // Collect CSS variable overrides
+      // Collect ALL CSS variables (always send current state, never diff against defaults)
       var cssVars = {};
+      // Preserve any non-hex vars loaded from server (overlay, font, shadow, hover, etc.)
+      if (_serverCssVars) {
+        Object.keys(_serverCssVars).forEach(function (k) { cssVars[k] = _serverCssVars[k]; });
+      }
       COLORS.forEach(function (c) {
         if (c.group) return;
-        if (colorValues[c.prop] && colorValues[c.prop] !== c.default) {
+        if (colorValues[c.prop]) {
           cssVars[c.prop] = colorValues[c.prop];
         }
       });
       var radiusInput = document.getElementById('radius');
       var radiusVal = radiusInput ? parseInt(radiusInput.value) : NaN;
-      if (!isNaN(radiusVal) && radiusVal !== 12) {
+      if (!isNaN(radiusVal)) {
         cssVars['--cc-radius'] = radiusVal + 'px';
         cssVars['--cc-radius-sm'] = Math.max(0, radiusVal - 4) + 'px';
       }
@@ -6791,8 +6796,9 @@ GET /api/proof?domain=mysite.com&amp;limit=10&amp;method=accept-all
         renderIntegrationCards();
       }
 
-      // Apply CSS variables
+      // Apply CSS variables — preserve ALL vars, not just hex colors
       if (cssVars && typeof cssVars === 'object') {
+        _serverCssVars = Object.assign({}, cssVars); // store full server state for round-trip
         Object.keys(cssVars).forEach(function (prop) {
           var value = cssVars[prop];
           if (prop === '--cc-radius') {
@@ -6801,6 +6807,9 @@ GET /api/proof?domain=mysite.com&amp;limit=10&amp;method=accept-all
             return;
           }
           if (prop === '--cc-radius-sm') return;
+          // Apply all vars to preview
+          cc.style.setProperty(prop, value);
+          // Only populate color pickers for hex values
           if (!/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(value)) return;
           colorValues[prop] = value;
           var colorInput = document.querySelector('input[type="color"][data-prop="' + CSS.escape(prop) + '"]');
@@ -6809,7 +6818,6 @@ GET /api/proof?domain=mysite.com&amp;limit=10&amp;method=accept-all
           if (swatch) swatch.style.background = value;
           if (colorInput) colorInput.value = value;
           if (hexInput) hexInput.value = value;
-          cc.style.setProperty(prop, value);
         });
       }
 
