@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CookieProof Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f8fafc;
+      color: #1e293b;
+      min-height: 100vh;
+    }
+    .page {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 60px 24px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+    .header-left h1 { font-size: 28px; margin-bottom: 4px; }
+    .header-left .subtitle { color: #64748b; }
+    .section { margin-bottom: 32px; }
+    .section h2 { font-size: 18px; margin-bottom: 12px; }
+    .section p { color: #475569; line-height: 1.7; }
+    .controls {
+      display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+      margin-top: 24px; padding: 20px;
+      background: #fff; border: 1px solid #e2e8f0;
+      border-radius: 12px;
+    }
+    .controls button, .controls .lang-select {
+      padding: 8px 16px; border: 1px solid #cbd5e1;
+      border-radius: 8px; background: #fff;
+      font-size: 13px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .controls button:hover { background: #f1f5f9; }
+
+    /* Language selector */
+    .lang-select {
+      appearance: none;
+      -webkit-appearance: none;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      padding: 8px 32px 8px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' fill='none' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+      cursor: pointer;
+      min-width: 160px;
+    }
+    .lang-select:focus {
+      outline: 2px solid #0d9488;
+      outline-offset: 2px;
+    }
+    .lang-divider {
+      width: 1px;
+      height: 28px;
+      background: #e2e8f0;
+      margin: 0 4px;
+    }
+
+    .state {
+      margin-top: 16px; padding: 16px;
+      background: #1e293b; color: #e2e8f0;
+      border-radius: 8px; font-family: monospace;
+      font-size: 13px; white-space: pre-wrap;
+      min-height: 60px;
+    }
+
+    /* Fake blocked content */
+    .blocked-content {
+      margin-top: 24px; padding: 40px;
+      background: #fff; border: 2px dashed #cbd5e1;
+      border-radius: 12px; text-align: center; color: #94a3b8;
+    }
+    .blocked-content.active {
+      border-color: #22c55e; border-style: solid;
+      color: #16a34a; background: #f0fdf4;
+    }
+
+    /* Demo script indicators */
+    .script-status {
+      display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px;
+    }
+    .script-badge {
+      padding: 6px 14px; border-radius: 20px;
+      font-size: 12px; font-weight: 500;
+    }
+    .script-badge.blocked { background: #fef2f2; color: #dc2626; }
+    .script-badge.active { background: #f0fdf4; color: #16a34a; }
+  </style>
+</head>
+<body>
+  <!-- Element MUST come before the scripts that reference it -->
+  <cookie-consent></cookie-consent>
+
+  <div class="page">
+    <div class="header">
+      <div class="header-left">
+        <h1>CookieProof</h1>
+        <p class="subtitle">GDPR & IMY 2026 compliant cookie consent Web Component</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>About this demo</h2>
+      <p>
+        This page demonstrates the consent banner, preferences panel, script-gating,
+        and Google Consent Mode V2 integration. The banner should appear automatically
+        on first visit. Use the controls below to interact programmatically.
+      </p>
+      <div style="margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap;">
+        <span class="script-badge" style="background:#f0fdfa;color:#0d9488;">GPC Aware</span>
+        <span class="script-badge" style="background:#f0fdfa;color:#0d9488;">Cookie Table</span>
+        <span class="script-badge" style="background:#f0fdfa;color:#0d9488;">Proof Endpoint</span>
+        <span class="script-badge" style="background:#f0fdfa;color:#0d9488;">Cross-subdomain</span>
+        <span class="script-badge" style="background:#f0fdfa;color:#0d9488;">Geo-aware</span>
+        <span class="script-badge" style="background:#f0fdfa;color:#0d9488;">GCM V2</span>
+        <span class="script-badge" style="background:#f0fdfa;color:#0d9488;">IMY 2026</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Script-gate status</h2>
+      <p>These scripts are blocked until you grant consent for their category:</p>
+      <div class="script-status">
+        <span class="script-badge blocked" id="badge-analytics">Analytics: BLOCKED</span>
+        <span class="script-badge blocked" id="badge-marketing">Marketing: BLOCKED</span>
+      </div>
+
+      <div class="blocked-content" id="analytics-block">
+        <strong>Google Analytics (analytics category)</strong><br />
+        Blocked until analytics consent is granted
+      </div>
+      <div class="blocked-content" id="marketing-block" style="margin-top: 12px;">
+        <strong>YouTube Embed (marketing category)</strong><br />
+        Blocked until marketing consent is granted
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Controls</h2>
+      <div class="controls">
+        <button id="btn-banner">Show Banner</button>
+        <button id="btn-prefs">Show Preferences</button>
+        <button id="btn-accept">Accept All</button>
+        <button id="btn-reject">Reject All</button>
+        <button id="btn-reset">Reset</button>
+        <div class="lang-divider"></div>
+        <select id="lang-select" class="lang-select" aria-label="Language">
+          <option value="en">English</option>
+          <option value="sv">Svenska</option>
+          <option value="de">Deutsch</option>
+          <option value="fr">Fran&ccedil;ais</option>
+          <option value="es">Espa&ntilde;ol</option>
+          <option value="no">Norsk</option>
+          <option value="da">Dansk</option>
+          <option value="fi">Suomi</option>
+        </select>
+      </div>
+      <div class="state" id="state">Waiting for CookieProof...</div>
+    </div>
+  </div>
+
+  <!-- Gated scripts (blocked until consent) -->
+  <script type="text/plain" data-consent="analytics" id="demo-analytics">
+    document.getElementById('badge-analytics').className = 'script-badge active';
+    document.getElementById('badge-analytics').textContent = 'Analytics: ACTIVE';
+    document.getElementById('analytics-block').className = 'blocked-content active';
+    document.getElementById('analytics-block').innerHTML = '<strong>Google Analytics</strong><br>Script executed!';
+  </script>
+
+  <script type="text/plain" data-consent="marketing" id="demo-marketing">
+    document.getElementById('badge-marketing').className = 'script-badge active';
+    document.getElementById('badge-marketing').textContent = 'Marketing: ACTIVE';
+    document.getElementById('marketing-block').className = 'blocked-content active';
+    document.getElementById('marketing-block').innerHTML = '<strong>YouTube Embed</strong><br>Script executed!';
+  </script>
+
+  <!-- Load CookieProof from project root -->
+  <script src="/dist/cookieproof.umd.js"></script>
+  <script>
+    // -- Extra demo translations (beyond the built-in en/sv) --
+    const extraTranslations = {
+      de: {
+        banner: {
+          title: 'Wir respektieren Ihre Privatsph\u00e4re',
+          description: 'Wir verwenden Cookies, um Ihre Erfahrung zu verbessern. Sie k\u00f6nnen w\u00e4hlen, welche Kategorien Sie akzeptieren.',
+          acceptAll: 'Alle akzeptieren',
+          rejectAll: 'Alle ablehnen',
+          settings: 'Einstellungen',
+          privacyPolicy: 'Datenschutzerkl\u00e4rung',
+        },
+        preferences: {
+          title: 'Cookie-Einstellungen',
+          save: 'Einstellungen speichern',
+          acceptAll: 'Alle akzeptieren',
+          privacyPolicy: 'Datenschutzerkl\u00e4rung',
+          moreInfo: 'Mehr erfahren',
+          moreInfoText: 'Wir verwenden Cookies und \u00e4hnliche Technologien, um unsere Dienste bereitzustellen, zu sch\u00fctzen und zu verbessern. Sie k\u00f6nnen Ihre Einstellungen jederzeit verwalten.',
+          rejectAll: 'Alle ablehnen',
+          cookieTableName: 'Cookie', cookieTableProvider: 'Anbieter', cookieTablePurpose: 'Zweck', cookieTableExpiry: 'Ablauf',
+        },
+        alwaysOnLabel: 'Immer aktiv',
+        categories: {
+          necessary: { label: 'Notwendig', description: 'Erforderlich f\u00fcr die ordnungsgem\u00e4\u00dfe Funktion der Website.' },
+          analytics: { label: 'Analyse', description: 'Helfen uns zu verstehen, wie Besucher die Website nutzen.' },
+          marketing: { label: 'Marketing', description: 'Werden verwendet, um relevante Werbung anzuzeigen.' },
+          preferences: { label: 'Pr\u00e4ferenzen', description: 'Speichern Ihre Einstellungen und Anpassungen.' },
+        },
+        trigger: { ariaLabel: 'Datenschutzeinstellungen' },
+      },
+      fr: {
+        banner: {
+          title: 'Nous respectons votre vie priv\u00e9e',
+          description: 'Nous utilisons des cookies pour am\u00e9liorer votre exp\u00e9rience. Vous pouvez choisir les cat\u00e9gories \u00e0 accepter.',
+          acceptAll: 'Tout accepter',
+          rejectAll: 'Tout refuser',
+          settings: 'Param\u00e8tres',
+          privacyPolicy: 'Politique de confidentialit\u00e9',
+        },
+        preferences: {
+          title: 'Param\u00e8tres des cookies',
+          save: 'Enregistrer',
+          acceptAll: 'Tout accepter',
+          privacyPolicy: 'Politique de confidentialit\u00e9',
+          moreInfo: 'En savoir plus',
+          moreInfoText: 'Nous utilisons des cookies et des technologies similaires pour fournir, prot\u00e9ger et am\u00e9liorer nos services. Vous pouvez g\u00e9rer vos pr\u00e9f\u00e9rences \u00e0 tout moment.',
+          rejectAll: 'Tout refuser',
+          cookieTableName: 'Cookie', cookieTableProvider: 'Fournisseur', cookieTablePurpose: 'Finalit\u00e9', cookieTableExpiry: 'Dur\u00e9e',
+        },
+        alwaysOnLabel: 'Toujours actif',
+        categories: {
+          necessary: { label: 'N\u00e9cessaires', description: 'Requis pour le bon fonctionnement du site.' },
+          analytics: { label: 'Analytiques', description: 'Nous aident \u00e0 comprendre comment les visiteurs utilisent le site.' },
+          marketing: { label: 'Marketing', description: 'Utilis\u00e9s pour diffuser des publicit\u00e9s pertinentes.' },
+          preferences: { label: 'Pr\u00e9f\u00e9rences', description: 'M\u00e9morisent vos param\u00e8tres et personnalisations.' },
+        },
+        trigger: { ariaLabel: 'Param\u00e8tres de confidentialit\u00e9' },
+      },
+      es: {
+        banner: {
+          title: 'Respetamos tu privacidad',
+          description: 'Utilizamos cookies para mejorar tu experiencia. Puedes elegir qu\u00e9 categor\u00edas aceptar.',
+          acceptAll: 'Aceptar todo',
+          rejectAll: 'Rechazar todo',
+          settings: 'Ajustes',
+          privacyPolicy: 'Pol\u00edtica de privacidad',
+        },
+        preferences: {
+          title: 'Ajustes de cookies',
+          save: 'Guardar preferencias',
+          acceptAll: 'Aceptar todo',
+          privacyPolicy: 'Pol\u00edtica de privacidad',
+          moreInfo: 'M\u00e1s informaci\u00f3n',
+          moreInfoText: 'Utilizamos cookies y tecnolog\u00edas similares para proporcionar, proteger y mejorar nuestros servicios. Puedes gestionar tus preferencias en cualquier momento.',
+          rejectAll: 'Rechazar todo',
+          cookieTableName: 'Cookie', cookieTableProvider: 'Proveedor', cookieTablePurpose: 'Prop\u00f3sito', cookieTableExpiry: 'Caducidad',
+        },
+        alwaysOnLabel: 'Siempre activo',
+        categories: {
+          necessary: { label: 'Necesarias', description: 'Necesarias para el correcto funcionamiento del sitio.' },
+          analytics: { label: 'An\u00e1lisis', description: 'Nos ayudan a entender c\u00f3mo los visitantes usan el sitio.' },
+          marketing: { label: 'Marketing', description: 'Se utilizan para mostrar anuncios relevantes.' },
+          preferences: { label: 'Preferencias', description: 'Guardan tus ajustes y personalizaciones.' },
+        },
+        trigger: { ariaLabel: 'Ajustes de privacidad' },
+      },
+      no: {
+        banner: {
+          title: 'Vi respekterer ditt personvern',
+          description: 'Vi bruker informasjonskapsler for \u00e5 forbedre opplevelsen din. Du kan velge hvilke kategorier du godtar.',
+          acceptAll: 'Godta alle',
+          rejectAll: 'Avvis alle',
+          settings: 'Innstillinger',
+          privacyPolicy: 'Personvernerkl\u00e6ring',
+        },
+        preferences: {
+          title: 'Innstillinger for informasjonskapsler',
+          save: 'Lagre innstillinger',
+          acceptAll: 'Godta alle',
+          privacyPolicy: 'Personvernerkl\u00e6ring',
+          moreInfo: 'Les mer',
+          moreInfoText: 'Vi bruker informasjonskapsler og lignende teknologier for \u00e5 levere, beskytte og forbedre v\u00e5re tjenester. Du kan administrere innstillingene dine n\u00e5r som helst.',
+          rejectAll: 'Avvis alle',
+          cookieTableName: 'Cookie', cookieTableProvider: 'Leverand\u00f8r', cookieTablePurpose: 'Form\u00e5l', cookieTableExpiry: 'Utl\u00f8per',
+        },
+        alwaysOnLabel: 'Alltid aktiv',
+        categories: {
+          necessary: { label: 'N\u00f8dvendige', description: 'Kreves for at nettstedet skal fungere korrekt.' },
+          analytics: { label: 'Analyse', description: 'Hjelper oss \u00e5 forst\u00e5 hvordan bes\u00f8kende bruker nettstedet.' },
+          marketing: { label: 'Markedsf\u00f8ring', description: 'Brukes til \u00e5 vise relevante annonser.' },
+          preferences: { label: 'Preferanser', description: 'Lagrer dine valg og tilpasninger.' },
+        },
+        trigger: { ariaLabel: 'Personverninnstillinger' },
+      },
+      da: {
+        banner: {
+          title: 'Vi respekterer dit privatliv',
+          description: 'Vi bruger cookies til at forbedre din oplevelse. Du kan v\u00e6lge, hvilke kategorier du accepterer.',
+          acceptAll: 'Accepter alle',
+          rejectAll: 'Afvis alle',
+          settings: 'Indstillinger',
+          privacyPolicy: 'Privatlivspolitik',
+        },
+        preferences: {
+          title: 'Cookieindstillinger',
+          save: 'Gem indstillinger',
+          acceptAll: 'Accepter alle',
+          privacyPolicy: 'Privatlivspolitik',
+          moreInfo: 'L\u00e6s mere',
+          moreInfoText: 'Vi bruger cookies og lignende teknologier til at levere, beskytte og forbedre vores tjenester. Du kan administrere dine indstillinger n\u00e5r som helst.',
+          rejectAll: 'Afvis alle',
+          cookieTableName: 'Cookie', cookieTableProvider: 'Udbyder', cookieTablePurpose: 'Form\u00e5l', cookieTableExpiry: 'Udl\u00f8b',
+        },
+        alwaysOnLabel: 'Altid aktiv',
+        categories: {
+          necessary: { label: 'N\u00f8dvendige', description: 'Kr\u00e6ves for at hjemmesiden fungerer korrekt.' },
+          analytics: { label: 'Analyse', description: 'Hj\u00e6lper os med at forst\u00e5, hvordan bes\u00f8gende bruger hjemmesiden.' },
+          marketing: { label: 'Markedsf\u00f8ring', description: 'Bruges til at vise relevante annoncer.' },
+          preferences: { label: 'Pr\u00e6ferencer', description: 'Gemmer dine valg og tilpasninger.' },
+        },
+        trigger: { ariaLabel: 'Privatlivsindstillinger' },
+      },
+      fi: {
+        banner: {
+          title: 'Kunnioitamme yksityisyytt\u00e4si',
+          description: 'K\u00e4yt\u00e4mme ev\u00e4steit\u00e4 parantaaksemme kokemustasi. Voit valita hyv\u00e4ksytt\u00e4v\u00e4t kategoriat.',
+          acceptAll: 'Hyv\u00e4ksy kaikki',
+          rejectAll: 'Hylk\u00e4\u00e4 kaikki',
+          settings: 'Asetukset',
+          privacyPolicy: 'Tietosuojak\u00e4yt\u00e4nt\u00f6',
+        },
+        preferences: {
+          title: 'Ev\u00e4steasetukset',
+          save: 'Tallenna asetukset',
+          acceptAll: 'Hyv\u00e4ksy kaikki',
+          privacyPolicy: 'Tietosuojak\u00e4yt\u00e4nt\u00f6',
+          moreInfo: 'Lue lis\u00e4\u00e4',
+          moreInfoText: 'K\u00e4yt\u00e4mme ev\u00e4steit\u00e4 ja vastaavia teknologioita palveluidemme tarjoamiseen, suojaamiseen ja parantamiseen. Voit hallita asetuksiasi milloin tahansa.',
+          rejectAll: 'Hylk\u00e4\u00e4 kaikki',
+          cookieTableName: 'Ev\u00e4ste', cookieTableProvider: 'Tarjoaja', cookieTablePurpose: 'Tarkoitus', cookieTableExpiry: 'Vanhenee',
+        },
+        alwaysOnLabel: 'Aina aktiivinen',
+        categories: {
+          necessary: { label: 'V\u00e4ltt\u00e4m\u00e4tt\u00f6m\u00e4t', description: 'Vaaditaan sivuston asianmukaiseen toimintaan.' },
+          analytics: { label: 'Analytiikka', description: 'Auttavat meit\u00e4 ymm\u00e4rt\u00e4m\u00e4\u00e4n, miten k\u00e4vij\u00e4t k\u00e4ytt\u00e4v\u00e4t sivustoa.' },
+          marketing: { label: 'Markkinointi', description: 'K\u00e4ytet\u00e4\u00e4n olennaisten mainosten n\u00e4ytt\u00e4miseen.' },
+          preferences: { label: 'Asetukset', description: 'Tallentavat valintasi ja mukautuksesi.' },
+        },
+        trigger: { ariaLabel: 'Tietosuoja-asetukset' },
+      },
+    };
+
+    const cc = document.querySelector('cookie-consent');
+    const stateEl = document.getElementById('state');
+    const langSelect = document.getElementById('lang-select');
+    let currentLang = 'en';
+
+    function getConfig(lang) {
+      return {
+        categories: [
+          { id: 'necessary', required: true, enabled: true, declarations: [
+            { name: 'ce_consent', provider: 'This site', purpose: 'Stores consent preferences', expiry: '1 year' },
+            { name: 'PHPSESSID', provider: 'This site', purpose: 'Session identifier', expiry: 'Session' },
+          ]},
+          { id: 'analytics', required: false, enabled: false, declarations: [
+            { name: '_ga', provider: 'Google', purpose: 'Distinguishes unique users', expiry: '2 years' },
+            { name: '_ga_*', provider: 'Google', purpose: 'Stores session state', expiry: '2 years' },
+            { name: '_gid', provider: 'Google', purpose: 'Distinguishes users', expiry: '24 hours' },
+          ]},
+          { id: 'marketing', required: false, enabled: false, declarations: [
+            { name: '_fbp', provider: 'Meta', purpose: 'Tracks visits across websites', expiry: '3 months' },
+            { name: '_gcl_au', provider: 'Google', purpose: 'Conversion linker', expiry: '3 months' },
+            { name: 'IDE', provider: 'Google', purpose: 'Ad serving & retargeting', expiry: '1 year' },
+          ]},
+          { id: 'preferences', required: false, enabled: false, declarations: [
+            { name: 'lang', provider: 'This site', purpose: 'Stores language preference', expiry: '1 year' },
+          ]},
+        ],
+        position: 'bottom',
+        theme: 'auto',
+        gcmEnabled: true,
+        floatingTrigger: 'left',
+        privacyPolicyUrl: 'https://example.com/privacy-policy',
+        language: lang,
+        translations: extraTranslations,
+      };
+    }
+
+    cc.configure(getConfig(currentLang));
+
+    function updateState() {
+      const consent = cc.getConsent();
+      stateEl.textContent = consent
+        ? JSON.stringify(consent, null, 2)
+        : 'No consent given yet';
+    }
+
+    cc.on('consent:init', updateState);
+    cc.on('consent:update', updateState);
+
+    // Language switcher
+    langSelect.addEventListener('change', function () {
+      currentLang = this.value;
+      document.documentElement.lang = currentLang;
+      cc.reset();
+      cc.configure(getConfig(currentLang));
+    });
+
+    // Wire up control buttons
+    document.getElementById('btn-banner').onclick = () => cc.showBanner();
+    document.getElementById('btn-prefs').onclick = () => cc.showPreferences();
+    document.getElementById('btn-accept').onclick = () => cc.acceptAll();
+    document.getElementById('btn-reject').onclick = () => cc.rejectAll();
+    document.getElementById('btn-reset').onclick = () => cc.reset();
+
+    setTimeout(updateState, 100);
+  </script>
+</body>
+</html>
