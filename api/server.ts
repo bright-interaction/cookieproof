@@ -811,6 +811,21 @@ const db = new Database(DB_PATH, { create: true });
 db.exec("PRAGMA journal_mode=WAL");
 db.exec("PRAGMA busy_timeout=5000");
 
+// Checkpoint WAL every 5 minutes to prevent data loss on container restart
+setInterval(() => {
+  try { db.exec("PRAGMA wal_checkpoint(PASSIVE)"); }
+  catch (_) { /* non-critical */ }
+}, 5 * 60 * 1000);
+
+// Checkpoint on shutdown
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => {
+    try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); db.close(); }
+    catch (_) { /* best effort */ }
+    process.exit(0);
+  });
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS consent_proofs (
     id          TEXT PRIMARY KEY,
@@ -1397,15 +1412,14 @@ const listConfigsStmt = db.prepare(
 );
 
 // ---------------------------------------------------------------------------
-// Seed default config for brightinteraction.com (apply dark gold theme)
+// Seed default config for brightinteraction.com (only if no config exists)
 // ---------------------------------------------------------------------------
 {
-  const existing = getConfigStmt.get("brightinteraction.com") as { css_vars: string | null } | null;
-  const hasGoldReject = existing?.css_vars?.includes('"--cc-btn-reject-bg":"#D4AF37"');
-  if (!hasGoldReject) {
+  const existing = getConfigStmt.get("brightinteraction.com") as { config: string | null } | null;
+  if (!existing) {
     const seedConfig = {
       position: "bottom",
-      theme: "dark",
+      theme: "light",
       language: "en",
       revision: 1,
       gcmEnabled: true,
@@ -1470,24 +1484,25 @@ const listConfigsStmt = db.prepare(
       ],
     };
     const seedCssVars = {
-      "--cc-bg": "#1E1E1E",
-      "--cc-bg-secondary": "#181818",
-      "--cc-text": "#E0E0E0",
-      "--cc-text-secondary": "#A0A0A0",
-      "--cc-border": "#2A2A2A",
-      "--cc-btn-primary-bg": "#D4AF37",
-      "--cc-btn-primary-text": "#121212",
-      "--cc-btn-secondary-bg": "#2A2A2A",
-      "--cc-btn-secondary-text": "#E0E0E0",
-      "--cc-btn-reject-bg": "#D4AF37",
-      "--cc-btn-reject-text": "#121212",
-      "--cc-toggle-on": "#D4AF37",
-      "--cc-toggle-off": "#555555",
-      "--cc-overlay": "rgba(0, 0, 0, 0.6)",
+      "--cc-bg": "#ffffff",
+      "--cc-bg-secondary": "#fafaf9",
+      "--cc-text": "#18181b",
+      "--cc-text-secondary": "#52525b",
+      "--cc-border": "#e7e5e4",
+      "--cc-btn-primary-bg": "#0891B2",
+      "--cc-btn-primary-text": "#ffffff",
+      "--cc-btn-reject-bg": "#0891B2",
+      "--cc-btn-reject-text": "#ffffff",
+      "--cc-btn-secondary-bg": "#18181b",
+      "--cc-btn-secondary-text": "#ffffff",
+      "--cc-btn-secondary-hover": "#3f3f46",
+      "--cc-toggle-on": "#0891B2",
+      "--cc-toggle-off": "#d6d3d1",
+      "--cc-overlay": "rgba(0, 0, 0, 0.4)",
       "--cc-radius": "12px",
       "--cc-radius-sm": "8px",
       "--cc-font": "'Inter', system-ui, sans-serif",
-      "--cc-shadow": "0 8px 32px rgba(0, 0, 0, 0.4)",
+      "--cc-shadow": "0 8px 24px rgba(0, 0, 0, 0.06)",
     };
     const now = Date.now();
     upsertConfigStmt.run({
