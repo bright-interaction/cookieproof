@@ -241,7 +241,7 @@ export function getStyles(): string {
       border-color: var(--cc-border);
     }
     .cc-btn-settings:hover {
-      background: var(--cc-border);
+      background: var(--cc-btn-secondary-hover, var(--cc-border));
     }
 
     /* ---- Preferences (Layer 2) ---- */
