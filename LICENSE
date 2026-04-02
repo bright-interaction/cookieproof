@@ -1,0 +1,47 @@
+MIT License
+
+Copyright (c) 2025-present Bright Interaction
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- Enterprise Edition Exception ---
+
+This MIT License does NOT apply to:
+
+1. Code within the "ee/" directory, which is governed by the CookieProof
+   Enterprise License (see ee/LICENSE).
+
+2. Enterprise Features embedded in other source files, identified by code
+   paths gated behind the COOKIEPROOF_LICENSE_KEY environment variable.
+   These features include, but are not limited to:
+
+   - API routes under /api/agency/*, /api/billing/*, /api/admin/*, /api/team/*
+   - Multi-tenant organization management
+   - Agency dashboard and white-label branding
+   - Billing and subscription management
+   - Team management and role-based invitations
+   - Admin panel and super-admin controls
+   - Scheduled reports and PDF generation
+   - Custom SMTP configuration per organization
+   - Custom domain management
+
+   These features are proprietary and subject to the CookieProof Enterprise
+   License (see ee/LICENSE), regardless of which source file they appear in.
+
+For questions about licensing, contact: contact@brightinteraction.com

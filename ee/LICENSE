@@ -1,0 +1,33 @@
+CookieProof Enterprise License
+
+Copyright (c) 2025-present Bright Interaction
+
+The code in the "ee/" directory, and all Enterprise Features gated behind
+the COOKIEPROOF_LICENSE_KEY environment variable (regardless of which
+source file they appear in), are proprietary and subject to the
+CookieProof Enterprise License.
+
+You may NOT:
+- Use enterprise features in production without a valid license key
+- Remove or bypass the license key verification
+- Redistribute enterprise features as part of a competing product
+
+You MAY:
+- View, read, and learn from the enterprise source code
+- Run enterprise features locally for evaluation and testing
+- Submit pull requests and bug reports
+
+Enterprise features include:
+- Multi-tenant organization management
+- Agency dashboard and white-label branding
+- Billing and subscription management (Mollie integration)
+- Team management and role-based invitations
+- Admin panel and super-admin controls
+- Scheduled reports and PDF generation
+- Custom SMTP configuration per organization
+- Custom domain management
+
+To obtain a license key, contact: contact@brightinteraction.com
+
+All other code in this repository is licensed under the MIT License.
+See the root LICENSE file.

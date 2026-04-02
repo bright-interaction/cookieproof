@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14b8a6"/>
+      <stop offset="100%" stop-color="#0d9488"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="url(#g)"/>
+  <g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Main gear -->
+    <circle cx="32" cy="28" r="6"/>
+    <path d="M32 18v-2M32 36v2M22.6 22.6l-1.4-1.4M40 34.8l1.4 1.4M22 28h-2M44 28h-2M22.6 33.4l-1.4 1.4M40 21.2l1.4-1.4"/>
+    <!-- Cookie dots -->
+    <circle cx="24" cy="44" r="2" fill="#fff" stroke="none" opacity="0.7"/>
+    <circle cx="32" cy="46" r="1.5" fill="#fff" stroke="none" opacity="0.5"/>
+    <circle cx="40" cy="43" r="2" fill="#fff" stroke="none" opacity="0.7"/>
+  </g>
+</svg>
