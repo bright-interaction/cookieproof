@@ -241,7 +241,7 @@ export function getStyles(): string {
       border-color: var(--cc-btn-secondary-bg);
     }
     .cc-btn-settings:hover {
-      background: var(--cc-btn-secondary-hover, #d1d5db);
+      background: var(--cc-btn-secondary-hover, #b8bec6);
     }
 
     /* ---- Preferences (Layer 2) ---- */
