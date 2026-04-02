@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CookieProof E2E Test</title>
+  <script src="/cookieproof.umd.js"></script>
+</head>
+<body>
+  <h1>E2E Test Page</h1>
+  <div id="status">no-consent</div>
+
+  <!-- Test scripts gated by consent categories -->
+  <script type="text/plain" data-consent="analytics">
+    document.getElementById('status').textContent = 'analytics-active';
+  </script>
+  <script type="text/plain" data-consent="marketing">
+    document.getElementById('status').dataset.marketing = 'active';
+  </script>
+
+  <cookie-consent id="cc"></cookie-consent>
+
+  <script>
+    const cc = document.getElementById('cc');
+    cc.init({
+      categories: [
+        { id: 'necessary', required: true },
+        { id: 'analytics' },
+        { id: 'marketing' },
+        { id: 'preferences' },
+      ],
+      floatingTrigger: true,
+      keyboardShortcut: 'Alt+C',
+    });
+  </script>
+</body>
+</html>

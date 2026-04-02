@@ -1,0 +1,109 @@
+{
+  "name": "cookieproof",
+  "version": "0.1.0",
+  "description": "GDPR & IMY 2026 compliant cookie consent Web Component with Shadow DOM, Google Consent Mode V2, and script-gate engine",
+  "type": "module",
+  "main": "dist/cookieproof.umd.js",
+  "module": "dist/cookieproof.esm.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/cookieproof.esm.js",
+      "require": "./dist/cookieproof.umd.js",
+      "types": "./dist/src/index.d.ts"
+    },
+    "./integrations": {
+      "types": "./dist/integrations/index.d.ts",
+      "import": "./dist/integrations/index.esm.js",
+      "require": "./dist/integrations/index.umd.js"
+    },
+    "./integrations/*": {
+      "types": "./dist/integrations/*.d.ts",
+      "import": "./dist/integrations/*.esm.js",
+      "require": "./dist/integrations/*.umd.js"
+    },
+    "./react": {
+      "types": "./wrappers/react.tsx",
+      "import": "./wrappers/react.tsx",
+      "default": "./wrappers/react.tsx"
+    },
+    "./vue": {
+      "types": "./wrappers/vue.ts",
+      "import": "./wrappers/vue.ts",
+      "default": "./wrappers/vue.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "!dist/**/*.map",
+    "wrappers/",
+    "src/core/types.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "rollup -c -w",
+    "build": "rollup -c",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "size": "npm run build && node scripts/check-size.mjs",
+    "test:e2e": "playwright test",
+    "test:all": "bun run test && playwright test",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cookie-consent",
+    "gdpr",
+    "imy",
+    "web-component",
+    "shadow-dom",
+    "google-consent-mode",
+    "privacy",
+    "compliance"
+  ],
+  "author": "Bright Interaction",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brightinteraction/cookieproof"
+  },
+  "homepage": "https://consent.brightinteraction.com",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.2",
+    "happy-dom": "^20.8.3",
+    "rollup": "^4.59.0",
+    "http-server": "^14.1.1",
+    "tslib": "^2.8.1",
+    "typescript": "^5.7.2",
+    "vitest": "^4.0.18"
+  },
+  "overrides": {
+    "serialize-javascript": ">=7.0.3"
+  },
+  "peerDependencies": {
+    "react": ">=17",
+    "vue": ">=3",
+    "@types/react": ">=17"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    },
+    "@types/react": {
+      "optional": true
+    }
+  },
+  "sideEffects": [
+    "dist/cookieproof.esm.js",
+    "dist/cookieproof.umd.js"
+  ]
+}
