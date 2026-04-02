@@ -3154,8 +3154,8 @@ unsub();</code></pre>
       </div>
       <div class="profile-modal-tabs">
         <button class="profile-modal-tab active" data-tab="account" onclick="switchProfileTab('account')">Account</button>
-        <button class="profile-modal-tab" data-tab="team" onclick="switchProfileTab('team')">Team</button>
-        <button class="profile-modal-tab" data-tab="billing" onclick="switchProfileTab('billing')">Billing</button>
+        <button class="profile-modal-tab" data-tab="team" onclick="switchProfileTab('team')" id="profile-tab-team-btn" style="display:none;">Team</button>
+        <button class="profile-modal-tab" data-tab="billing" onclick="switchProfileTab('billing')" id="profile-tab-billing-btn" style="display:none;">Billing</button>
         <button class="profile-modal-tab" data-tab="agency" onclick="switchProfileTab('agency')" id="profile-tab-agency-btn" style="display:none;">Agency</button>
         <button class="profile-modal-tab" data-tab="security" onclick="switchProfileTab('security')">Security</button>
         <button class="profile-modal-tab" data-tab="api" onclick="switchProfileTab('api')" id="profile-tab-api-btn" style="display:none;">API</button>
@@ -6831,8 +6831,11 @@ GET /api/proof?domain=mysite.com&amp;limit=10&amp;method=accept-all
       document.getElementById('profile-dropdown').style.display = 'none';
       document.getElementById('profile-modal-overlay').classList.add('open');
       // Show/hide Agency tab based on account type
-      var isAgency = currentAccountType === 'agency' || currentAccountType === 'admin' || currentAccountType === 'super_admin';
+      var isAgency = eeLicensed && (currentAccountType === 'agency' || currentAccountType === 'admin' || currentAccountType === 'super_admin');
       document.getElementById('profile-tab-agency-btn').style.display = isAgency ? '' : 'none';
+      // EE: show team and billing tabs only with license
+      document.getElementById('profile-tab-team-btn').style.display = eeLicensed ? '' : 'none';
+      document.getElementById('profile-tab-billing-btn').style.display = eeLicensed ? '' : 'none';
       // Show API tab for owner/admin roles
       var isOwnerOrAdmin = !currentUser || !currentUser.role || currentUser.role === 'owner' || currentUser.role === 'admin' || currentAccountType === 'admin' || currentAccountType === 'super_admin';
       document.getElementById('profile-tab-api-btn').style.display = isOwnerOrAdmin ? '' : 'none';
@@ -7983,6 +7986,8 @@ GET /api/proof?domain=mysite.com&amp;limit=10&amp;method=accept-all
     let currentDisplayName = null;   // user's custom display name for profile chip
     let homeOrgId = null;            // user's primary org (first one where role=owner)
     let emailVerified = true;        // assume verified until we know otherwise
+    let eeLicensed = false;          // Enterprise Edition license status
+    let eeFeatures = [];             // Licensed EE features
     let login2FARequired = false;    // whether login requires 2FA code
 
     function toggleAuthMode(e) {
@@ -8405,6 +8410,16 @@ GET /api/proof?domain=mysite.com&amp;limit=10&amp;method=accept-all
     }
 
     async function checkAuthState() {
+      // Check Enterprise Edition license status
+      try {
+        const licRes = await fetch(getApiBase().replace(/\/api\/?$/, '') + '/api/license');
+        if (licRes.ok) {
+          const licData = await licRes.json();
+          eeLicensed = licData.licensed === true;
+          eeFeatures = licData.features || [];
+        }
+      } catch (e) { eeLicensed = false; eeFeatures = []; }
+
       if (!isAuthenticated()) {
         currentUser = null; currentOrg = null; userOrgs = [];
         currentAccountType = 'user'; currentDisplayName = null;
@@ -8871,6 +8886,7 @@ GET /api/proof?domain=mysite.com&amp;limit=10&amp;method=accept-all
     }
 
     function isAgencyOrAdminUser() {
+      if (!eeLicensed) return false;
       return currentAccountType === 'agency' || currentAccountType === 'admin' || currentAccountType === 'super_admin';
     }
 

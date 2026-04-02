@@ -7,6 +7,58 @@ const DB_PATH = process.env.DB_PATH || "/data/consent-proofs.db";
 const ENV_API_KEY = process.env.API_KEY || "";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
 
+// Enterprise Edition license key — gates agency, billing, admin, and team features.
+// See ee/LICENSE for terms. Obtain a key at https://brightinteraction.com
+const EE_LICENSE_KEY = process.env.COOKIEPROOF_LICENSE_KEY || "";
+const EE_PUBLIC_KEY = "O/isFGNuoIiV5VVd1/0OfvjPf6F2Ld4DxwZ5J+qsQFc=";
+
+interface EELicensePayload {
+  org: string;
+  features: string[];
+  expires: string;
+  issued_at: string;
+}
+
+let EE_ENABLED = false;
+let EE_LICENSE: EELicensePayload | null = null;
+
+if (EE_LICENSE_KEY) {
+  try {
+    const signedJSON = Buffer.from(EE_LICENSE_KEY, "base64");
+    const signed = JSON.parse(signedJSON.toString());
+    const licJSON = Buffer.from(signed.license, "base64");
+    const sigBytes = Buffer.from(signed.signature, "base64");
+    const pubKey = Buffer.from(EE_PUBLIC_KEY, "base64");
+
+    // Ed25519 verification using Node crypto
+    const { verify } = await import("crypto");
+    const isValid = verify(
+      null,
+      licJSON,
+      { key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), pubKey]), format: "der", type: "spki" },
+      sigBytes
+    );
+
+    if (isValid) {
+      const lic: EELicensePayload = JSON.parse(licJSON.toString());
+      const expiry = new Date(lic.expires + "T23:59:59Z");
+      if (expiry > new Date()) {
+        EE_ENABLED = true;
+        EE_LICENSE = lic;
+        console.log(`[cookieproof-api] Enterprise license active: org=${lic.org}, expires=${lic.expires}`);
+      } else {
+        console.error(`[cookieproof-api] Enterprise license EXPIRED: ${lic.expires}`);
+      }
+    } else {
+      console.error("[cookieproof-api] Enterprise license INVALID: signature verification failed");
+    }
+  } catch (e) {
+    console.error("[cookieproof-api] Enterprise license INVALID: could not parse key");
+  }
+} else {
+  console.log("[cookieproof-api] Running in open-source mode (agency/billing/admin/team disabled)");
+}
+
 // SECURITY: Dynamic dummy hash for timing attack prevention
 // Generated at startup with same Argon2id parameters as real passwords
 let DUMMY_PASSWORD_HASH: string = "";
@@ -3838,6 +3890,26 @@ _server = Bun.serve({
         });
       }
       return cors(new Response(null, { status: 204 }), origin);
+    }
+
+    // ---- Enterprise Edition gate --------------------------------------------
+    // Block EE routes when no license key is configured.
+    const EE_PATHS = ["/api/agency/", "/api/billing/", "/api/admin/", "/api/team/"];
+    if (!EE_ENABLED && EE_PATHS.some(p => path.startsWith(p))) {
+      return cors(json({
+        error: "This feature requires a CookieProof Enterprise license.",
+        docs: "https://github.com/bright-interaction/cookieproof/blob/main/ee/LICENSE"
+      }, 403), origin);
+    }
+
+    // ---- GET /api/license ---------------------------------------------------
+    if (req.method === "GET" && path === "/api/license") {
+      return cors(json({
+        licensed: EE_ENABLED,
+        org: EE_LICENSE?.org || null,
+        features: EE_LICENSE?.features || [],
+        expires: EE_LICENSE?.expires || null,
+      }), origin);
     }
 
     // ---- POST /api/proof ---------------------------------------------------
