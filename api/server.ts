@@ -717,6 +717,32 @@ function isPrivateHost(hostname: string): boolean {
   return false;
 }
 
+/**
+ * Resolve a hostname via DNS and check all resolved IPs against private ranges.
+ * Prevents DNS rebinding where a hostname resolves to a public IP during the
+ * string check but to a private IP during the actual fetch.
+ * Returns the first resolved IP if safe, or null if any resolved IP is private.
+ */
+async function resolveAndCheckHost(hostname: string): Promise<string | null> {
+  // Skip resolution for raw IP addresses (already checked by isPrivateHost)
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) || hostname.includes(':')) {
+    return isPrivateHost(hostname) ? null : hostname;
+  }
+  try {
+    const results = await Bun.dns.resolve(hostname, "A");
+    if (!results || results.length === 0) return null;
+    for (const record of results) {
+      const addr = typeof record === 'string' ? record : (record as any).address;
+      if (!addr || isPrivateHost(addr)) return null;
+    }
+    // Return the first resolved IP for pinning
+    const first = results[0];
+    return typeof first === 'string' ? first : (first as any).address;
+  } catch {
+    return null; // DNS resolution failed — treat as unsafe
+  }
+}
+
 // Auto-purge consent proofs older than RETENTION_DAYS (GDPR Art. 5(1)(e))
 // Runs once daily at a random offset to avoid thundering herd
 const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -6952,11 +6978,18 @@ _server = Bun.serve({
         return cors(json({ error: "Missing or invalid 'url' parameter. Must start with http:// or https://" }, 400), origin);
       }
 
-      // SSRF protection – block private/internal addresses
+      // SSRF protection – block private/internal addresses + DNS rebinding
+      let resolvedIp: string | null = null;
+      let parsedScanUrl: URL;
       try {
-        const parsed = new URL(targetUrl);
-        if (isPrivateHost(parsed.hostname)) {
+        parsedScanUrl = new URL(targetUrl);
+        if (isPrivateHost(parsedScanUrl.hostname)) {
           return cors(json({ error: "Scanning internal/private addresses is not allowed" }, 403), origin);
+        }
+        // Resolve DNS and pin the IP to prevent DNS rebinding attacks
+        resolvedIp = await resolveAndCheckHost(parsedScanUrl.hostname);
+        if (!resolvedIp) {
+          return cors(json({ error: "Hostname resolves to a private/internal address or could not be resolved" }, 403), origin);
         }
       } catch {
         return cors(json({ error: "Invalid URL" }, 400), origin);
@@ -6967,8 +7000,14 @@ _server = Bun.serve({
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15_000); // 15s timeout
 
-        const response = await fetch(targetUrl, {
-          headers: { 'User-Agent': 'cookieproof-scanner/1.0' },
+        // Pin the resolved IP to prevent DNS rebinding between check and fetch
+        const pinnedUrl = new URL(targetUrl);
+        pinnedUrl.hostname = resolvedIp;
+        const response = await fetch(pinnedUrl.toString(), {
+          headers: {
+            'User-Agent': 'cookieproof-scanner/1.0',
+            'Host': parsedScanUrl.hostname, // Preserve original Host header
+          },
           redirect: 'manual', // Don't follow redirects — prevents SSRF via redirect chain
           signal: controller.signal,
         });
