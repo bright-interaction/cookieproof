@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { randomUUID, createHash, createHmac, randomBytes, timingSafeEqual } from "crypto";
+import { randomUUID, createHash, createHmac, randomBytes, timingSafeEqual, createCipheriv, createDecipheriv } from "crypto";
 import { scanHtml } from "./scanner/scanner.js";
 
 const PORT = Number(process.env.PORT) || 3100;
@@ -73,6 +73,58 @@ const SMTP_PORT = Number(process.env.SMTP_PORT) || 587;
 const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || "";
 const SMTP_FROM = process.env.SMTP_FROM || "";
+
+// AES-256-GCM encryption for agency SMTP passwords at rest
+const SMTP_ENCRYPTION_KEY = process.env.SMTP_ENCRYPTION_KEY || "";
+let smtpEncryptionKeyBuf: Buffer | null = null;
+if (SMTP_ENCRYPTION_KEY) {
+  const keyBuf = Buffer.from(SMTP_ENCRYPTION_KEY, "hex");
+  if (keyBuf.length === 32) {
+    smtpEncryptionKeyBuf = keyBuf;
+    console.log("[cookieproof-api] SMTP password encryption enabled (AES-256-GCM)");
+  } else {
+    console.error("[cookieproof-api] WARNING: SMTP_ENCRYPTION_KEY must be 64 hex chars (32 bytes). SMTP passwords will be stored in plaintext.");
+  }
+} else {
+  console.warn("[cookieproof-api] WARNING: SMTP_ENCRYPTION_KEY not set. Agency SMTP passwords stored in plaintext.");
+}
+
+/** Encrypt a plaintext string with AES-256-GCM. Returns "enc:iv:ciphertext:tag" */
+function encryptSmtpPass(plaintext: string): string {
+  if (!smtpEncryptionKeyBuf || !plaintext) return plaintext;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", smtpEncryptionKeyBuf, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc:${iv.toString("hex")}:${encrypted.toString("hex")}:${tag.toString("hex")}`;
+}
+
+/** Decrypt an AES-256-GCM encrypted string. Returns plaintext or original string if not encrypted. */
+function decryptSmtpPass(stored: string): string {
+  if (!stored || !stored.startsWith("enc:")) return stored;
+  if (!smtpEncryptionKeyBuf) {
+    console.error("[cookieproof-api] Cannot decrypt SMTP password: SMTP_ENCRYPTION_KEY not set");
+    return "";
+  }
+  try {
+    const parts = stored.split(":");
+    if (parts.length !== 4) return stored;
+    const iv = Buffer.from(parts[1], "hex");
+    const encrypted = Buffer.from(parts[2], "hex");
+    const tag = Buffer.from(parts[3], "hex");
+    const decipher = createDecipheriv("aes-256-gcm", smtpEncryptionKeyBuf, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+  } catch (e: any) {
+    console.error("[cookieproof-api] Failed to decrypt SMTP password:", e.message);
+    return "";
+  }
+}
+
+/** Check if a stored value looks like it's already encrypted */
+function isEncryptedSmtpPass(stored: string): boolean {
+  return !!stored && stored.startsWith("enc:");
+}
 
 // Resend API (preferred over SMTP when configured)
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
@@ -1213,6 +1265,22 @@ db.exec("CREATE INDEX IF NOT EXISTS idx_webhooks_org ON webhooks(org_id)");
       updated_at INTEGER NOT NULL
     )
   `);
+
+  // Migrate existing plaintext SMTP passwords to AES-256-GCM encryption
+  if (smtpEncryptionKeyBuf) {
+    const rows = db.prepare("SELECT user_id, smtp_pass FROM agency_smtp WHERE smtp_pass IS NOT NULL AND smtp_pass != ''").all() as { user_id: string; smtp_pass: string }[];
+    let migrated = 0;
+    for (const row of rows) {
+      if (!isEncryptedSmtpPass(row.smtp_pass)) {
+        const encrypted = encryptSmtpPass(row.smtp_pass);
+        db.prepare("UPDATE agency_smtp SET smtp_pass = ? WHERE user_id = ?").run(encrypted, row.user_id);
+        migrated++;
+      }
+    }
+    if (migrated > 0) {
+      console.log(`[cookieproof-api] Migrated ${migrated} plaintext SMTP password(s) to AES-256-GCM`);
+    }
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS alert_log (
@@ -3761,7 +3829,7 @@ function getSmtpConfig(agencyUserId?: string): { host: string; port: number; use
     const row = db.prepare(
       "SELECT smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from FROM agency_smtp WHERE user_id = ?"
     ).get(agencyUserId) as { smtp_host: string; smtp_port: number; smtp_user: string; smtp_pass: string; smtp_from: string } | null;
-    if (row?.smtp_host) return { host: row.smtp_host, port: row.smtp_port, user: row.smtp_user, pass: row.smtp_pass, from: row.smtp_from };
+    if (row?.smtp_host) return { host: row.smtp_host, port: row.smtp_port, user: row.smtp_user, pass: decryptSmtpPass(row.smtp_pass), from: row.smtp_from };
   }
   return { host: SMTP_HOST, port: SMTP_PORT, user: SMTP_USER, pass: SMTP_PASS, from: SMTP_FROM };
 }
@@ -7735,8 +7803,9 @@ _server = Bun.serve({
 
       const now = Date.now();
       const existing = db.prepare("SELECT user_id, smtp_pass FROM agency_smtp WHERE user_id = ?").get(authCtx.userId) as { user_id: string; smtp_pass: string } | null;
-      // Keep existing password if not provided in update
-      const smtpPass = typeof data.smtp_pass === "string" && data.smtp_pass ? data.smtp_pass.slice(0, 500) : (existing?.smtp_pass || "");
+      // Keep existing password if not provided in update; encrypt new passwords before storing
+      const rawPass = typeof data.smtp_pass === "string" && data.smtp_pass ? data.smtp_pass.slice(0, 500) : "";
+      const smtpPass = rawPass ? encryptSmtpPass(rawPass) : (existing?.smtp_pass || "");
       if (existing) {
         db.prepare("UPDATE agency_smtp SET smtp_host = ?, smtp_port = ?, smtp_user = ?, smtp_pass = ?, smtp_from = ?, updated_at = ? WHERE user_id = ?")
           .run(smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, now, authCtx.userId);
@@ -7773,7 +7842,7 @@ _server = Bun.serve({
       ].join("\r\n");
 
       try {
-        await sendSmtpEmail(row.smtp_host, row.smtp_port, row.smtp_user, row.smtp_pass, row.smtp_from, authCtx.email, testMessage);
+        await sendSmtpEmail(row.smtp_host, row.smtp_port, row.smtp_user, decryptSmtpPass(row.smtp_pass), row.smtp_from, authCtx.email, testMessage);
         return cors(json({ ok: true, sent_to: authCtx.email }), origin);
       } catch (e: any) {
         console.error(`[cookieproof-api] SMTP test failed for ${maskEmail(authCtx.email)}:`, e.message);
