@@ -2,8 +2,8 @@ services:
   web:
     build: .
     restart: unless-stopped
-    ports:
-      - "3457:8080"
+    # No host port exposure — traffic is routed by dockyard-proxy-caddy
+    # via the dockyard-proxy external network.
     depends_on:
       api:
         condition: service_healthy
@@ -35,7 +35,7 @@ services:
           memory: 64M
     networks:
       - internal
-      - proxy
+      - dockyard-proxy
 
   api:
     build: ./api
@@ -165,5 +165,5 @@ volumes:
 
 networks:
   internal:
-  proxy:
+  dockyard-proxy:
     external: true

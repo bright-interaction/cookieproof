@@ -1,12 +1,12 @@
-FROM node:20-alpine AS build
+FROM oven/bun:1-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm install --ignore-scripts
+COPY package.json bun.lock* ./
+RUN bun install --frozen-lockfile --ignore-scripts
 COPY src/ src/
 COPY integrations/ integrations/
 COPY configurator/loader.js configurator/loader.js
 COPY rollup.config.mjs tsconfig.json ./
-RUN npm run build && \
+RUN bun run build && \
     echo -n "sha384-$(cat dist/cookieproof.umd.js | openssl dgst -sha384 -binary | openssl base64 -A)" > dist/cookieproof.sri
 
 # Use unprivileged nginx image for security

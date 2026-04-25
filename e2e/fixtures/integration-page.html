@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CookieProof Integration Test</title>
+  <script>
+    // Round-trip test scaffolding.
+    //
+    // The widget's ConsentManager enforces that proofEndpoint starts with
+    // "https://". On a local test server we only have http://localhost:3456,
+    // so we hand the widget a fake https URL and intercept navigator.sendBeacon
+    // (and fetch as a fallback) to rewrite it to the local origin.
+    //
+    // We also support overriding the `url` field inside the proof payload via
+    // ?proofUrlOverride=... so we can test the API's domain-not-allowed path
+    // without reaching for browser internals like Location.
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const proofUrlOverride = params.get('proofUrlOverride');
+      const FAKE_PROOF_URL = 'https://test.local/api/proof';
+      const REAL_PROOF_URL = location.origin + '/api/proof';
+
+      function rewriteBody(payload) {
+        if (!proofUrlOverride) return payload;
+        try {
+          const obj = JSON.parse(payload);
+          obj.url = proofUrlOverride;
+          return JSON.stringify(obj);
+        } catch {
+          return payload;
+        }
+      }
+
+      const originalSendBeacon = navigator.sendBeacon ? navigator.sendBeacon.bind(navigator) : null;
+      navigator.sendBeacon = function (url, data) {
+        if (typeof url === 'string' && url === FAKE_PROOF_URL) {
+          // Convert Blob -> string so we can rewrite if needed
+          const handle = (text) => {
+            const body = rewriteBody(text);
+            // Use fetch (keepalive) for visibility to Playwright's waitForResponse
+            fetch(REAL_PROOF_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body,
+              keepalive: true,
+            }).catch(() => {});
+          };
+          if (data instanceof Blob) {
+            data.text().then(handle);
+          } else if (typeof data === 'string') {
+            handle(data);
+          } else if (data && typeof data.arrayBuffer === 'function') {
+            data.arrayBuffer().then((buf) => handle(new TextDecoder().decode(buf)));
+          } else {
+            handle('');
+          }
+          return true;
+        }
+        if (originalSendBeacon) return originalSendBeacon(url, data);
+        return false;
+      };
+
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = function (input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (url === FAKE_PROOF_URL) {
+          const newInit = Object.assign({}, init);
+          if (typeof newInit.body === 'string') {
+            newInit.body = rewriteBody(newInit.body);
+          }
+          return originalFetch(REAL_PROOF_URL, newInit);
+        }
+        return originalFetch(input, init);
+      };
+    })();
+  </script>
+  <script src="/cookieproof.umd.js"></script>
+</head>
+<body>
+  <h1>Integration Test Page</h1>
+  <div id="status">no-consent</div>
+
+  <cookie-consent id="cc"></cookie-consent>
+
+  <script>
+    const cc = document.getElementById('cc');
+    // Use configure() rather than the private init(): connectedCallback queues
+    // a microtask that runs init({}) with the empty default config before this
+    // inline script gets a chance, which builds the banner DOM with default
+    // English translations. configure() detects the already-initialised state
+    // and triggers rebuild() so our translations actually reach the DOM.
+    cc.configure({
+      categories: [
+        { id: 'necessary', required: true, label: 'Necessary' },
+        { id: 'analytics', label: 'Analytics' },
+        { id: 'marketing', label: 'Marketing' },
+      ],
+      translations: {
+        en: {
+          banner: {
+            title: 'E2E test banner',
+            description: 'Round-trip from configurator to widget.',
+            acceptAll: 'Accept all',
+            rejectAll: 'Reject all',
+            settings: 'Preferences',
+          },
+        },
+      },
+      proofEndpoint: 'https://test.local/api/proof',
+      floatingTrigger: true,
+    });
+  </script>
+</body>
+</html>

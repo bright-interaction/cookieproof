@@ -8,8 +8,8 @@ export function getStyles(): string {
       --cc-border: #e5e7eb;
       --cc-btn-primary-bg: #0d9488;
       --cc-btn-primary-text: #ffffff;
-      --cc-btn-secondary-bg: #e5e7eb;
-      --cc-btn-secondary-text: #374151;
+      --cc-btn-secondary-bg: #d1d5db;
+      --cc-btn-secondary-text: #1f2937;
       --cc-toggle-on: #0d9488;
       --cc-btn-reject-bg: #374151;
       --cc-btn-reject-text: #ffffff;
@@ -238,10 +238,10 @@ export function getStyles(): string {
     .cc-btn-settings {
       background: var(--cc-btn-secondary-bg);
       color: var(--cc-btn-secondary-text);
-      border-color: var(--cc-border);
+      border-color: var(--cc-btn-secondary-bg);
     }
     .cc-btn-settings:hover {
-      background: var(--cc-btn-secondary-hover, var(--cc-border));
+      background: var(--cc-btn-secondary-hover, #b8bec6);
     }
 
     /* ---- Preferences (Layer 2) ---- */

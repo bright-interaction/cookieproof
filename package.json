@@ -66,7 +66,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/brightinteraction/cookieproof"
+    "url": "https://github.com/bright-interaction/cookieproof"
   },
   "homepage": "https://consent.brightinteraction.com",
   "engines": {
