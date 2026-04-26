@@ -1,7 +1,8 @@
 FROM oven/bun:1-alpine AS build
 WORKDIR /app
 COPY package.json bun.lock* ./
-RUN bun install --frozen-lockfile --ignore-scripts
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile --ignore-scripts
 COPY src/ src/
 COPY integrations/ integrations/
 COPY configurator/loader.js configurator/loader.js
