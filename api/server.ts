@@ -1,13 +1,27 @@
 import { Database } from "bun:sqlite";
 import { randomUUID, createHash, createHmac, randomBytes, timingSafeEqual, createCipheriv, createDecipheriv } from "crypto";
 import { scanHtml } from "./scanner/scanner.js";
+import { Verifier as SharedVerifier, Signer as SharedSigner } from "./sharedsecret.ts";
 
 const PORT = Number(process.env.PORT) || 3100;
 const DB_PATH = process.env.DB_PATH || "/data/consent-proofs.db";
 const ENV_API_KEY = process.env.API_KEY || "";
+const ENV_API_KEY_PREVIOUS = process.env.API_KEY_PREVIOUS || "";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
 
-// Enterprise Edition license key — gates agency, billing, admin, and team features.
+// ADMIN_RELOAD_TOKEN gates POST /api/admin/reload-secrets, the endpoint
+// Dockyard's rotation engine targets to hot-swap API_KEY + WEBHOOK_SECRET
+// without restarting the container. Empty = endpoint returns 503.
+const ADMIN_RELOAD_TOKEN = process.env.ADMIN_RELOAD_TOKEN || "";
+
+// Long-lived verifier + signer singletons. /api/admin/reload-secrets calls
+// .update() on these in place; auth + webhook fan-out paths read from them
+// every request, so the new value takes effect on the next call without a
+// restart. These are NOT exported, only the reload handler mutates them.
+const apiKeyVerifier = new SharedVerifier(ENV_API_KEY, ENV_API_KEY_PREVIOUS);
+const webhookSigner = new SharedSigner(process.env.WEBHOOK_SECRET || "");
+
+// Enterprise Edition license key , gates agency, billing, admin, and team features.
 // See ee/LICENSE for terms. Obtain a key at https://brightinteraction.com
 const EE_LICENSE_KEY = process.env.COOKIEPROOF_LICENSE_KEY || "";
 const EE_PUBLIC_KEY = "O/isFGNuoIiV5VVd1/0OfvjPf6F2Ld4DxwZ5J+qsQFc=";
@@ -317,7 +331,8 @@ const ENV_ORIGINS: string[] = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
   : [];
 const WEBHOOK_URL = process.env.WEBHOOK_URL || "";
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
+// WEBHOOK_SECRET is consumed via webhookSigner (defined near the top) so
+// /admin/reload-secrets can hot-swap it without restart.
 
 // ---------------------------------------------------------------------------
 // JWT helpers
@@ -730,7 +745,7 @@ function isPrivateHost(hostname: string): boolean {
     if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 (benchmark testing)
   }
 
-  // Block IPv6 — normalise compressed forms before checking
+  // Block IPv6 , normalise compressed forms before checking
   // Expand :: shorthand to full form for reliable matching
   let ipv6 = h;
 
@@ -753,9 +768,9 @@ function isPrivateHost(hostname: string): boolean {
     // Expand :: to full form for reliable matching
     const expanded = expandIPv6(ipv6);
     if (expanded) {
-      // Loopback — 0000:0000:0000:0000:0000:0000:0000:0001
+      // Loopback , 0000:0000:0000:0000:0000:0000:0000:0001
       if (expanded === '0000:0000:0000:0000:0000:0000:0000:0001') return true;
-      // All-zeros — 0000:...:0000
+      // All-zeros , 0000:...:0000
       if (/^(0000:){7}0000$/.test(expanded)) return true;
       // Link-local fe80::/10
       if (/^fe[89ab]/i.test(expanded)) return true;
@@ -791,7 +806,7 @@ async function resolveAndCheckHost(hostname: string): Promise<string | null> {
     const first = results[0];
     return typeof first === 'string' ? first : (first as any).address;
   } catch {
-    return null; // DNS resolution failed — treat as unsafe
+    return null; // DNS resolution failed , treat as unsafe
   }
 }
 
@@ -813,7 +828,7 @@ const VALID_METHODS = new Set(["accept-all", "reject-all", "custom", "gpc", "dns
 const POISONED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const MAX_EMAIL_LEN = 254; // RFC 5321
 const MAX_BODY_SIZE = 10 * 1024; // 10 KB
-const MAX_JSON_BODY = 1024 * 1024; // 1 MB — general cap for JSON endpoints
+const MAX_JSON_BODY = 1024 * 1024; // 1 MB , general cap for JSON endpoints
 
 // SECURITY: Password strength validation
 // Top 100 most common passwords (sourced from SecLists/rockyou analysis)
@@ -1409,7 +1424,7 @@ db.exec("CREATE INDEX IF NOT EXISTS idx_webhooks_org ON webhooks(org_id)");
         if (userCount.cnt === 1) {
           const onlyUser = db.prepare("SELECT id, email FROM users LIMIT 1").get() as { id: string; email: string };
           db.prepare("UPDATE users SET account_type = 'super_admin' WHERE id = ?").run(onlyUser.id);
-          console.log(`[cookieproof-api] No ADMIN_EMAIL set — auto-promoted sole user to super_admin: ${maskEmail(onlyUser.email)}`);
+          console.log(`[cookieproof-api] No ADMIN_EMAIL set , auto-promoted sole user to super_admin: ${maskEmail(onlyUser.email)}`);
         }
       }
     })();
@@ -1701,11 +1716,11 @@ function getAllowedOriginsForDomain(domain: string): string[] {
   // Auto-derive origins from the domain config itself (+ www variant)
   const autoOrigins = config ? deriveOrigins(domain) : [];
   if (!config) {
-    // Domain not configured at all — only allow env-managed origins
+    // Domain not configured at all , only allow env-managed origins
     return [...ENV_ORIGINS];
   }
   if (!config.org_id) {
-    // Unscoped domain (migration data) — allow env origins + auto-derived + unscoped DB origins
+    // Unscoped domain (migration data) , allow env origins + auto-derived + unscoped DB origins
     const unscopedOrigins = db.prepare("SELECT origin FROM allowed_domains WHERE org_id IS NULL").all() as { origin: string }[];
     return [...new Set([...ENV_ORIGINS, ...autoOrigins, ...unscopedOrigins.map(r => r.origin)])];
   }
@@ -1890,7 +1905,7 @@ async function sendVerificationEmail(userId: string, email: string, origin: stri
 
   if (!RESEND_API_KEY && (!SMTP_HOST || !SMTP_FROM)) {
     // SECURITY: Never log actual tokens - only log that email is not configured
-    console.warn(`[cookieproof-api] Email not configured — verification token generated for ${maskEmail(email)} (check DB to retrieve)`);
+    console.warn(`[cookieproof-api] Email not configured , verification token generated for ${maskEmail(email)} (check DB to retrieve)`);
     return rawToken;
   }
 
@@ -1916,7 +1931,7 @@ async function sendVerificationEmail(userId: string, email: string, origin: stri
     </p>
     <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">
     <p style="color:#94a3b8;font-size:12px;margin:0;">
-      CookieProof — GDPR Compliant Cookie Consent
+      CookieProof , GDPR Compliant Cookie Consent
     </p>
   </div>
 </body>
@@ -2078,13 +2093,13 @@ ${orgAlerts.map(o => `<div style="margin:0 0 16px;padding:16px;border:1px solid 
 <p style="color:#94a3b8;font-size:12px;margin-top:24px;border-top:1px solid #e2e8f0;padding-top:16px;">This is an automated alert from CookieProof. <a href="https://consent.example.com/configurator/" style="color:#0d9488;">Open Dashboard</a></p>
 </body></html>`;
 
-  const plainText = `Alert Digest — ${nowStr}\n\n` +
+  const plainText = `Alert Digest , ${nowStr}\n\n` +
     orgAlerts.map(o => `${o.orgName.replace(/[\r\n]/g, "")}:\n${o.alerts.map(a => `  - ${a.replace(/[\r\n]/g, "")}`).join("\n")}`).join("\n\n") +
     `\n\nThis is an automated alert from CookieProof.`;
 
   const message = [
     `From: ${smtp.from}`, `To: ${to}`,
-    `Subject: CookieProof Alert Digest — ${nowStr}`,
+    `Subject: CookieProof Alert Digest , ${nowStr}`,
     `MIME-Version: 1.0`,
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     ``, `--${boundary}`,
@@ -2208,28 +2223,28 @@ function getBillingEmailHtml(
         <p style="margin:20px 0;"><a href="${escAttr(reactivateLink)}" style="display:inline-block;padding:12px 28px;background:#0d9488;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Reactivate Subscription</a></p>`
     },
     period_ending_7d: {
-      subject: `7 days left on your CookieProof subscription — ${orgName}`,
+      subject: `7 days left on your CookieProof subscription , ${orgName}`,
       heading: "Your Subscription Ends in 7 Days",
       body: `<p>This is a friendly reminder that your CookieProof subscription for <strong>${escHtml(orgName)}</strong> will end on <strong>${data.periodEndDate}</strong>.</p>
         <p>To avoid service interruption, please reactivate your subscription:</p>
         <p style="margin:20px 0;"><a href="${escAttr(reactivateLink)}" style="display:inline-block;padding:12px 28px;background:#0d9488;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Reactivate Now</a></p>`
     },
     period_ending_3d: {
-      subject: `3 days left — Your CookieProof subscription is ending — ${orgName}`,
+      subject: `3 days left , Your CookieProof subscription is ending , ${orgName}`,
       heading: "Only 3 Days Left on Your Subscription",
       body: `<p>Your CookieProof subscription for <strong>${escHtml(orgName)}</strong> will expire on <strong>${data.periodEndDate}</strong>.</p>
         <p>After this date, your cookie consent banner will stop working on your website(s). Don't let your visitors see a broken experience!</p>
         <p style="margin:20px 0;"><a href="${escAttr(reactivateLink)}" style="display:inline-block;padding:12px 28px;background:#0d9488;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Reactivate Subscription</a></p>`
     },
     period_ending_1d: {
-      subject: `URGENT: Your CookieProof subscription expires tomorrow — ${orgName}`,
+      subject: `URGENT: Your CookieProof subscription expires tomorrow , ${orgName}`,
       heading: "Your Subscription Expires Tomorrow",
       body: `<p><strong>Final reminder:</strong> Your CookieProof subscription for <strong>${escHtml(orgName)}</strong> expires tomorrow (<strong>${data.periodEndDate}</strong>).</p>
         <p>Starting tomorrow, your cookie consent banner will stop working. Reactivate now to maintain compliance:</p>
         <p style="margin:20px 0;"><a href="${escAttr(reactivateLink)}" style="display:inline-block;padding:12px 28px;background:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Reactivate Immediately</a></p>`
     },
     subscription_expired: {
-      subject: `Your CookieProof subscription has expired — ${orgName}`,
+      subject: `Your CookieProof subscription has expired , ${orgName}`,
       heading: "Your Subscription Has Expired",
       body: `<p>Your CookieProof subscription for <strong>${escHtml(orgName)}</strong> has now expired.</p>
         <p><strong>What this means:</strong></p>
@@ -2242,7 +2257,7 @@ function getBillingEmailHtml(
         <p style="margin:20px 0;"><a href="${escAttr(reactivateLink)}" style="display:inline-block;padding:12px 28px;background:#0d9488;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Reactivate &amp; Restore Access</a></p>`
     },
     deletion_warning_14d: {
-      subject: `Account deletion in 14 days — ${orgName}`,
+      subject: `Account deletion in 14 days , ${orgName}`,
       heading: "Your Account Will Be Deleted in 14 Days",
       body: `<p>Your CookieProof account for <strong>${escHtml(orgName)}</strong> is scheduled for permanent deletion on <strong>${data.deletionDate}</strong>.</p>
         <p>Once deleted, all your configuration, consent proof history, and account data will be permanently removed and cannot be recovered.</p>
@@ -2250,14 +2265,14 @@ function getBillingEmailHtml(
         <p style="margin:20px 0;"><a href="${escAttr(reactivateLink)}" style="display:inline-block;padding:12px 28px;background:#0d9488;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Reactivate Subscription</a></p>`
     },
     deletion_warning_7d: {
-      subject: `Account deletion in 7 days — ${orgName}`,
+      subject: `Account deletion in 7 days , ${orgName}`,
       heading: "Your Account Will Be Deleted in 7 Days",
       body: `<p>This is a reminder that your CookieProof account for <strong>${escHtml(orgName)}</strong> will be permanently deleted on <strong>${data.deletionDate}</strong>.</p>
         <p>All your consent proof history, banner configurations, and account data will be permanently removed.</p>
         <p style="margin:20px 0;"><a href="${escAttr(reactivateLink)}" style="display:inline-block;padding:12px 28px;background:#f59e0b;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Reactivate to Cancel Deletion</a></p>`
     },
     deletion_warning_1d: {
-      subject: `FINAL WARNING: Account deletion tomorrow — ${orgName}`,
+      subject: `FINAL WARNING: Account deletion tomorrow , ${orgName}`,
       heading: "Your Account Will Be Deleted Tomorrow",
       body: `<p><strong>Final notice:</strong> Your CookieProof account for <strong>${escHtml(orgName)}</strong> will be permanently deleted tomorrow (<strong>${data.deletionDate}</strong>).</p>
         <p>This is your last chance to save your account data. After deletion:</p>
@@ -2269,10 +2284,10 @@ function getBillingEmailHtml(
         <p style="margin:20px 0;"><a href="${escAttr(reactivateLink)}" style="display:inline-block;padding:12px 28px;background:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Save My Account Now</a></p>`
     },
     account_deleted: {
-      subject: `Your CookieProof account has been deleted — ${orgName}`,
+      subject: `Your CookieProof account has been deleted , ${orgName}`,
       heading: "Your Account Has Been Deleted",
       body: `<p>Your CookieProof account for <strong>${escHtml(orgName)}</strong> has been permanently deleted as scheduled.</p>
-        <p>Attached to this email is your final consent proof history report — a PDF containing all consent records from your subscription period.</p>
+        <p>Attached to this email is your final consent proof history report , a PDF containing all consent records from your subscription period.</p>
         <p>If you'd like to use CookieProof again in the future, you're welcome to create a new account at any time.</p>
         <p>Thank you for using CookieProof. We wish you all the best!</p>`
     },
@@ -2502,7 +2517,7 @@ td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; color: #334155; }
 </head>
 <body>
 <h1>Consent Proof History Report</h1>
-<p class="subtitle">Final export for ${escHtml(orgName)} — Generated ${now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</p>
+<p class="subtitle">Final export for ${escHtml(orgName)} , Generated ${now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</p>
 
 <h2>Domains Covered</h2>
 <div class="domains">
@@ -2537,7 +2552,7 @@ ${samples.map((s: any) => `<tr>
 <div class="footer">
 This report was automatically generated by CookieProof upon account closure.
 For questions, contact support@brightinteraction.com.<br>
-CookieProof by Bright Interaction — GDPR &amp; IMY 2026 Compliant Cookie Consent
+CookieProof by Bright Interaction , GDPR &amp; IMY 2026 Compliant Cookie Consent
 </div>
 </body>
 </html>`;
@@ -2566,7 +2581,7 @@ CookieProof by Bright Interaction — GDPR &amp; IMY 2026 Compliant Cookie Conse
 }
 
 // ---------------------------------------------------------------------------
-// Billing lifecycle checker — runs periodically to handle subscriptions
+// Billing lifecycle checker , runs periodically to handle subscriptions
 // ---------------------------------------------------------------------------
 let _billingLifecycleRunning = false;
 async function runBillingLifecycleCheck(): Promise<void> {
@@ -2596,7 +2611,7 @@ async function runBillingLifecycleCheck(): Promise<void> {
       } else if (daysUntilEnd === 1) {
         await sendBillingLifecycleEmail(sub.org_id, "period_ending_1d");
       } else if (daysUntilEnd <= 0) {
-        // Period has ended — expire the subscription and set up 30-day deletion
+        // Period has ended , expire the subscription and set up 30-day deletion
         db.prepare(`UPDATE subscriptions SET status = 'canceled', updated_at = ? WHERE id = ?`)
           .run(now, sub.id);
         db.prepare(`UPDATE orgs SET plan = 'expired', deletion_scheduled_at = ? WHERE id = ?`)
@@ -2623,7 +2638,7 @@ async function runBillingLifecycleCheck(): Promise<void> {
       } else if (daysUntilDeletion === 1) {
         await sendBillingLifecycleEmail(org.id, "deletion_warning_1d");
       } else if (daysUntilDeletion <= 0) {
-        // Time to delete — generate final PDF and send deletion email
+        // Time to delete , generate final PDF and send deletion email
         console.log(`[billing-lifecycle] Starting account deletion for org ${org.id}`);
 
         // Generate final PDF report
@@ -2659,7 +2674,7 @@ async function runBillingLifecycleCheck(): Promise<void> {
           db.prepare("DELETE FROM scheduled_reports WHERE org_id = ?").run(org.id);
           db.prepare("DELETE FROM invite_tokens WHERE org_id = ?").run(org.id);
 
-          // Remove org members (but keep users — they may belong to other orgs)
+          // Remove org members (but keep users , they may belong to other orgs)
           db.prepare("DELETE FROM org_members WHERE org_id = ?").run(org.id);
 
           // Archive the org instead of deleting (for audit trail)
@@ -2680,7 +2695,7 @@ async function runBillingLifecycleCheck(): Promise<void> {
     `).all(now) as { id: string; name: string | null; grace_ends_at: number }[];
 
     for (const org of failedPaymentOrgs) {
-      // Grace period ended without payment — expire and schedule deletion
+      // Grace period ended without payment , expire and schedule deletion
       db.prepare(`UPDATE orgs SET plan = 'expired', deletion_scheduled_at = ? WHERE id = ?`)
         .run(now + 30 * DAY_MS, org.id);
       db.prepare(`UPDATE subscriptions SET status = 'canceled', updated_at = ? WHERE org_id = ? AND status = 'active'`)
@@ -2808,7 +2823,7 @@ async function runScheduledReports(): Promise<void> {
         const smtp = getSmtpConfig(schedule.created_by);
         if (!smtp.host || !smtp.from) continue; // Skip if no SMTP available (system or agency)
         const safeRecipient = schedule.recipient_email.replace(/[\r\n]/g, "");
-        const schedSubject = `${schedule.frequency === "weekly" ? "Weekly" : "Monthly"} Consent Report: ${orgName} (${fromDate} — ${toDate})`.replace(/[\r\n\t]/g, " ").slice(0, 200);
+        const schedSubject = `${schedule.frequency === "weekly" ? "Weekly" : "Monthly"} Consent Report: ${orgName} (${fromDate} , ${toDate})`.replace(/[\r\n\t]/g, " ").slice(0, 200);
         const emailBody = [
           `From: ${smtp.from}`, `To: ${safeRecipient}`,
           `Subject: ${schedSubject}`,
@@ -2818,7 +2833,7 @@ async function runScheduledReports(): Promise<void> {
           `Content-Type: text/plain; charset=utf-8`, `Content-Transfer-Encoding: 7bit`,
           ``, `Hello,`, ``,
           `Please find attached the ${schedule.frequency} consent compliance report for ${orgName}.`,
-          `Period: ${fromDate} — ${toDate}`, ``,
+          `Period: ${fromDate} , ${toDate}`, ``,
           `Best regards,`, `${brandName}`,
           ``, `--${boundary}`,
           `Content-Type: ${attachMime}; name="consent-report-${safeFilename}.${attachExt}"`,
@@ -2874,8 +2889,10 @@ function fireWebhook(proof: { id: string; domain: string; url: string; method: s
   try {
     const body = JSON.stringify({ event: "consent.recorded", data: proof, timestamp: Date.now() });
     const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (WEBHOOK_SECRET) {
-      headers["X-Webhook-Signature"] = createHmac("sha256", WEBHOOK_SECRET).update(body).digest("hex");
+    // webhookSigner is hot-swappable via /api/admin/reload-secrets; sign
+    // with the current value only (never the rotation grace value).
+    if (webhookSigner.configured()) {
+      headers["X-Webhook-Signature"] = webhookSigner.sign(body);
     }
     const controller = new AbortController();
     const webhookTimeout = setTimeout(() => controller.abort(), 10_000);
@@ -3160,14 +3177,11 @@ function getAuthContext(req: Request): AuthContext | null {
     }
   }
 
-  // Constant-time comparison against env var to prevent timing oracle
-  if (ENV_API_KEY) {
-    try {
-      if (timingSafeEqual(Buffer.from(token), Buffer.from(ENV_API_KEY)))
-        return { type: "apikey" };
-    } catch {
-      // Length mismatch — fall through to DB check
-    }
+  // Constant-time comparison against the live verifier (accepts current +
+  // previous during a rotation grace window). /api/admin/reload-secrets
+  // hot-swaps the verifier values without restart.
+  if (apiKeyVerifier.configured() && apiKeyVerifier.equalString(token)) {
+    return { type: "apikey" };
   }
 
   // Check DB-stored key by hash (comparison done in SQLite, not JS)
@@ -3181,6 +3195,100 @@ function getAuthContext(req: Request): AuthContext | null {
 
 function requireAuth(req: Request): boolean {
   return getAuthContext(req) !== null;
+}
+
+// handleAdminReloadSecrets is the Dockyard rotation target. Bearer-token
+// auth via ADMIN_RELOAD_TOKEN. Hot-swaps API_KEY + WEBHOOK_SECRET in the
+// long-lived verifier + signer singletons. Allowlist-filtered keys; unknown
+// keys are silently dropped. 16KB body cap.
+//
+// Request shape (mirror of brightcrm/atomicsite/scanner-dashboard/svar-go):
+//
+//   POST /admin/reload-secrets
+//   Authorization: Bearer <ADMIN_RELOAD_TOKEN>
+//   {
+//     "secrets": {
+//       "API_KEY":          "new",
+//       "API_KEY_PREVIOUS": "old",
+//       "WEBHOOK_SECRET":   "new"
+//     }
+//   }
+//
+// 204 success, 401 bad bearer, 503 if ADMIN_RELOAD_TOKEN unset.
+const COOKIEPROOF_RELOAD_ALLOWLIST = new Set([
+  "API_KEY",
+  "API_KEY_PREVIOUS",
+  "WEBHOOK_SECRET",
+]);
+
+async function handleAdminReloadSecrets(req: Request): Promise<Response> {
+  if (!ADMIN_RELOAD_TOKEN) {
+    return json({ error: "admin reload not configured" }, 503);
+  }
+
+  const auth = req.headers.get("Authorization") || "";
+  const prefix = "Bearer ";
+  if (!auth.startsWith(prefix)) {
+    return json({ error: "missing bearer token" }, 401);
+  }
+  const token = auth.slice(prefix.length);
+  const tokenBuf = Buffer.from(token);
+  const expected = Buffer.from(ADMIN_RELOAD_TOKEN);
+  let ok = false;
+  if (tokenBuf.length === expected.length) {
+    try { ok = timingSafeEqual(tokenBuf, expected); } catch { ok = false; }
+  }
+  if (!ok) {
+    return json({ error: "invalid bearer token" }, 401);
+  }
+
+  // 16KB body cap. Bun's Request doesn't have MaxBytesReader; we read text
+  // first and check size, payload is always small.
+  const raw = await req.text();
+  if (raw.length > 16 * 1024) {
+    return json({ error: "body too large" }, 413);
+  }
+
+  let parsed: { secrets?: Record<string, string> };
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  if (!parsed.secrets || typeof parsed.secrets !== "object") {
+    return json({ error: "missing secrets" }, 400);
+  }
+
+  const staged: Record<string, string> = {};
+  for (const [k, v] of Object.entries(parsed.secrets)) {
+    if (typeof v !== "string") continue;
+    if (COOKIEPROOF_RELOAD_ALLOWLIST.has(k)) staged[k] = v;
+  }
+  if (Object.keys(staged).length === 0) {
+    return json({ error: "no recognised secrets in payload" }, 400);
+  }
+
+  const updated: string[] = [];
+
+  if ("API_KEY" in staged) {
+    apiKeyVerifier.update(staged.API_KEY, staged.API_KEY_PREVIOUS || "");
+    updated.push("API_KEY");
+  }
+  if ("WEBHOOK_SECRET" in staged) {
+    webhookSigner.update(staged.WEBHOOK_SECRET);
+    updated.push("WEBHOOK_SECRET");
+  }
+
+  if (updated.length === 0) {
+    return json({ error: "rotation must supply API_KEY or WEBHOOK_SECRET" }, 400);
+  }
+
+  console.log("[cookieproof-api] admin: reloaded secrets", {
+    keys: updated,
+    api_secondary_active: apiKeyVerifier.hasSecondary(),
+  });
+
+  return new Response(null, { status: 204 });
 }
 
 // SECURITY: Get auth context with CSRF validation for state-changing requests
@@ -3494,7 +3602,7 @@ function logAuditEvent(
 // ---------------------------------------------------------------------------
 function domainParam(raw: string | null): string {
   if (!raw) return "%";
-  // Never allow raw wildcards — always escape user input
+  // Never allow raw wildcards , always escape user input
   return escapeLike(raw);
 }
 
@@ -3593,7 +3701,7 @@ function generateReportHtml(opts: {
   }
 
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Consent Report — ${escHtml(opts.orgName)}</title>
+<html><head><meta charset="utf-8"><title>Consent Report , ${escHtml(opts.orgName)}</title>
 <style>
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;padding:0;color:#1e293b;font-size:14px;line-height:1.6;background:#f8fafc;}
   .wrap{max-width:720px;margin:0 auto;background:#fff;}
@@ -3631,7 +3739,7 @@ function generateReportHtml(opts: {
 </div>
 <div class="content">
   <h1>${escHtml(opts.orgName)}</h1>
-  <p class="subtitle">Period: ${fromDate} — ${toDate}</p>
+  <p class="subtitle">Period: ${fromDate} , ${toDate}</p>
   <h2>Summary</h2>
   <div class="stats-grid no-break">
     <div class="stat-box"><div class="stat-val">${consentStats.total.toLocaleString()}</div><div class="stat-lbl">Total Consents</div></div>
@@ -3678,13 +3786,13 @@ function generateReportHtml(opts: {
       <tr><td>Consent banner deployed</td><td>${orgDomains.length > 0 ? "✓ Yes" : "✗ No"}</td></tr>
       <tr><td>Proof of consent collected</td><td>${consentStats.total > 0 ? "✓ Yes" : "✗ No"}</td></tr>
       <tr><td>Reject option available</td><td>${consentStats.reject_all > 0 ? "✓ Yes" : "⚠ Not observed"}</td></tr>
-      <tr><td>CCPA compliance</td><td>${ccpaEnabled ? "✓ Enabled" : "— Not enabled"}</td></tr>
+      <tr><td>CCPA compliance</td><td>${ccpaEnabled ? "✓ Enabled" : ", Not enabled"}</td></tr>
     </tbody>
   </table>
   </div>
 </div>
 <div class="footer">
-  ${escHtml(brandName)} — Consent Compliance Report &mdash; Confidential
+  ${escHtml(brandName)} , Consent Compliance Report , Confidential
 </div>
 </div>
 </body></html>`;
@@ -3748,7 +3856,7 @@ async function htmlToPdf(html: string, footerHtml?: string): Promise<Buffer> {
   return Buffer.from(await resp.arrayBuffer());
 }
 
-/** Minimal SMTP client — sends a pre-built email message via STARTTLS */
+/** Minimal SMTP client , sends a pre-built email message via STARTTLS */
 async function sendSmtpEmail(
   host: string, port: number, user: string, pass: string,
   from: string, to: string, message: string
@@ -3776,7 +3884,7 @@ async function sendSmtpEmail(
       if (step === 0 && code === 220) { step = 1; send("EHLO cookieproof"); }
       else if (step === 1 && code === 250) { step = 2; send("STARTTLS"); }
       else if (step === 2 && code === 220) {
-        // Upgrade to TLS — remove raw socket listener first to prevent
+        // Upgrade to TLS , remove raw socket listener first to prevent
         // encrypted bytes from corrupting the shared buffer (Bun compat)
         step = 3;
         socket.removeAllListeners("data");
@@ -3822,7 +3930,7 @@ async function sendSmtpEmail(
 }
 
 // ---------------------------------------------------------------------------
-// Agency SMTP config resolver — returns custom SMTP if configured, else system defaults
+// Agency SMTP config resolver , returns custom SMTP if configured, else system defaults
 // ---------------------------------------------------------------------------
 function getSmtpConfig(agencyUserId?: string): { host: string; port: number; user: string; pass: string; from: string } {
   if (agencyUserId) {
@@ -3859,7 +3967,7 @@ async function sendResendEmail(to: string, subject: string, html: string, text?:
 }
 
 // ---------------------------------------------------------------------------
-// Unified email sender — prefers Resend, falls back to SMTP
+// Unified email sender , prefers Resend, falls back to SMTP
 // ---------------------------------------------------------------------------
 async function sendEmail(
   to: string,
@@ -3986,6 +4094,16 @@ _server = Bun.serve({
       return cors(new Response(null, { status: 204 }), origin);
     }
 
+    // ---- POST /admin/reload-secrets (Dockyard rotation target) -------------
+    // Bearer-token-auth via ADMIN_RELOAD_TOKEN. Sits OUTSIDE the EE gate (it
+    // governs runtime secrets, not enterprise features) and outside any other
+    // auth middleware (carries its own bearer). Hot-swaps API_KEY +
+    // WEBHOOK_SECRET in the long-lived verifier + signer singletons, so the
+    // next request sees the new values without a restart.
+    if (req.method === "POST" && path === "/admin/reload-secrets") {
+      return cors(await handleAdminReloadSecrets(req), origin);
+    }
+
     // ---- Enterprise Edition gate --------------------------------------------
     // Block EE routes when no license key is configured.
     const EE_PATHS = ["/api/agency/", "/api/billing/", "/api/admin/", "/api/team/"];
@@ -4066,7 +4184,7 @@ _server = Bun.serve({
           return cors(json({ error: "Too many consent records for this domain. Try again later." }, 429), origin);
         }
 
-        // Always use server timestamp for audit integrity — client timestamp
+        // Always use server timestamp for audit integrity , client timestamp
         // is stored as metadata only, never as the authoritative record time.
         const createdAt = Date.now();
 
@@ -4251,7 +4369,7 @@ _server = Bun.serve({
       console.log("[cookieproof-api] API key generated via setup endpoint.");
       return cors(json({
         key: newKey,
-        message: "Save this key — it will not be shown again.",
+        message: "Save this key , it will not be shown again.",
       }, 201), origin);
     }
 
@@ -4298,7 +4416,7 @@ _server = Bun.serve({
 
       if (ENV_API_KEY && keySource === "env") {
         return cors(json({
-          error: "Cannot rotate — key is managed via environment variable. Change API_KEY env var and restart.",
+          error: "Cannot rotate , key is managed via environment variable. Change API_KEY env var and restart.",
         }, 400), origin);
       }
 
@@ -4729,7 +4847,7 @@ _server = Bun.serve({
       return cors(json({ orgs: enriched }), origin);
     }
 
-    // ---- GET /api/alerts (JWT auth) — current alerts for user's org --------
+    // ---- GET /api/alerts (JWT auth) , current alerts for user's org --------
     if (req.method === "GET" && path === "/api/alerts") {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -4745,7 +4863,7 @@ _server = Bun.serve({
       return cors(json({ alerts, health }), origin);
     }
 
-    // ---- GET /api/alerts/history (JWT auth) — alert history for user's org -
+    // ---- GET /api/alerts/history (JWT auth) , alert history for user's org -
     if (req.method === "GET" && path === "/api/alerts/history") {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -4772,7 +4890,7 @@ _server = Bun.serve({
       return cors(json({ history, total, limit, offset }), origin);
     }
 
-    // ---- POST /api/alerts/dismiss (JWT auth) — dismiss an alert ------------
+    // ---- POST /api/alerts/dismiss (JWT auth) , dismiss an alert ------------
     if (req.method === "POST" && path === "/api/alerts/dismiss") {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -4801,7 +4919,7 @@ _server = Bun.serve({
       return cors(json({ ok: true }), origin);
     }
 
-    // ---- POST /api/alerts/dismiss-all (JWT auth) — dismiss all current alerts
+    // ---- POST /api/alerts/dismiss-all (JWT auth) , dismiss all current alerts
     if (req.method === "POST" && path === "/api/alerts/dismiss-all") {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -4826,7 +4944,7 @@ _server = Bun.serve({
       return cors(json({ ok: true, dismissed: alerts.length }), origin);
     }
 
-    // ---- GET /api/alerts/all (JWT auth, admin) — all orgs' alerts ----------
+    // ---- GET /api/alerts/all (JWT auth, admin) , all orgs' alerts ----------
     if (req.method === "GET" && path === "/api/alerts/all") {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -4949,7 +5067,7 @@ _server = Bun.serve({
       return cors(json({ ok: true }), origin);
     }
 
-    // ---- GET /api/auth/export-data (JWT auth) — GDPR personal data export ---
+    // ---- GET /api/auth/export-data (JWT auth) , GDPR personal data export ---
     if (req.method === "GET" && path === "/api/auth/export-data") {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -5128,7 +5246,7 @@ _server = Bun.serve({
     </p>
     <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">
     <p style="color:#94a3b8;font-size:12px;margin:0;">
-      CookieProof — GDPR Compliant Cookie Consent
+      CookieProof , GDPR Compliant Cookie Consent
     </p>
   </div>
 </body>
@@ -5140,7 +5258,7 @@ _server = Bun.serve({
           .catch(e => console.error(`[cookieproof-api] Failed to send password reset email to ${maskEmail(user.email)}:`, e.message));
       } else {
         // SECURITY: Never log actual tokens - only log that email is not configured
-        console.warn(`[cookieproof-api] Email not configured — password reset token generated for ${maskEmail(user.email)} (check DB to retrieve)`);
+        console.warn(`[cookieproof-api] Email not configured , password reset token generated for ${maskEmail(user.email)} (check DB to retrieve)`);
       }
 
       return successResponse;
@@ -5216,7 +5334,7 @@ _server = Bun.serve({
       return authResponse({ ok: true }, token, origin);
     }
 
-    // ---- GET /api/auth/reset-password/:token (public) — validate token ----
+    // ---- GET /api/auth/reset-password/:token (public) , validate token ----
     if (req.method === "GET" && path.startsWith("/api/auth/reset-password/")) {
       if (isAuthRateLimited(clientIp(req))) return cors(json({ valid: false, error: "Too many attempts" }, 429), origin);
       const rawToken = path.slice("/api/auth/reset-password/".length);
@@ -5297,7 +5415,7 @@ _server = Bun.serve({
       return authResponse({ ok: true, email: user.email }, token, origin);
     }
 
-    // ---- GET /api/auth/verify-email/:token (public) — validate token -------
+    // ---- GET /api/auth/verify-email/:token (public) , validate token -------
     if (req.method === "GET" && path.startsWith("/api/auth/verify-email/")) {
       if (isAuthRateLimited(clientIp(req))) return cors(json({ valid: false, error: "Too many attempts" }, 429), origin);
       const rawToken = path.slice("/api/auth/verify-email/".length);
@@ -5341,7 +5459,7 @@ _server = Bun.serve({
 
       // Check if email is configured (Resend or SMTP)
       if (!RESEND_API_KEY && (!SMTP_HOST || !SMTP_FROM)) {
-        console.warn(`[cookieproof-api] Email not configured — cannot send verification email to ${maskEmail(user.email)}`);
+        console.warn(`[cookieproof-api] Email not configured , cannot send verification email to ${maskEmail(user.email)}`);
         return cors(json({ error: "Email delivery is not configured. Please contact support." }, 503), origin);
       }
 
@@ -5353,7 +5471,7 @@ _server = Bun.serve({
       return cors(json({ ok: true, message: "Verification email sent" }), origin);
     }
 
-    // ---- GET /api/auth/2fa/setup (JWT auth) — generate TOTP secret ---------
+    // ---- GET /api/auth/2fa/setup (JWT auth) , generate TOTP secret ---------
     if (req.method === "GET" && path === "/api/auth/2fa/setup") {
       // SECURITY: Rate limit to prevent abuse of secret generation
       if (isAuthRateLimited(clientIp(req))) return cors(json({ error: "Too many attempts. Try again later." }, 429), origin);
@@ -5375,13 +5493,13 @@ _server = Bun.serve({
       const secret = generateTotpSecret();
       const uri = generateTotpUri(secret, user.email);
 
-      // Store temporarily (not enabled yet) — will be confirmed via /2fa/enable
+      // Store temporarily (not enabled yet) , will be confirmed via /2fa/enable
       db.prepare("UPDATE users SET totp_secret = ? WHERE id = ?").run(secret, user.id);
 
       return cors(json({ secret, uri }), origin);
     }
 
-    // ---- POST /api/auth/2fa/enable (JWT auth) — verify code and enable -----
+    // ---- POST /api/auth/2fa/enable (JWT auth) , verify code and enable -----
     if (req.method === "POST" && path === "/api/auth/2fa/enable") {
       if (isAuthRateLimited(clientIp(req))) return cors(json({ error: "Too many attempts. Try again later." }, 429), origin);
       const ctx = getAuthContextWithCsrf(req);
@@ -5437,7 +5555,7 @@ _server = Bun.serve({
       return cors(json({ ok: true, backup_codes: backupCodes }), origin);
     }
 
-    // ---- POST /api/auth/2fa/disable (JWT auth) — disable 2FA ---------------
+    // ---- POST /api/auth/2fa/disable (JWT auth) , disable 2FA ---------------
     if (req.method === "POST" && path === "/api/auth/2fa/disable") {
       if (isAuthRateLimited(clientIp(req))) return cors(json({ error: "Too many attempts. Try again later." }, 429), origin);
       const ctx = getAuthContextWithCsrf(req);
@@ -5482,7 +5600,7 @@ _server = Bun.serve({
       return cors(json({ ok: true }), origin);
     }
 
-    // ---- GET /api/auth/2fa/status (JWT auth) — check if 2FA is enabled -----
+    // ---- GET /api/auth/2fa/status (JWT auth) , check if 2FA is enabled -----
     if (req.method === "GET" && path === "/api/auth/2fa/status") {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -5506,7 +5624,7 @@ _server = Bun.serve({
       }), origin);
     }
 
-    // ---- POST /api/auth/2fa/regenerate-backup (JWT auth) — get new codes ---
+    // ---- POST /api/auth/2fa/regenerate-backup (JWT auth) , get new codes ---
     if (req.method === "POST" && path === "/api/auth/2fa/regenerate-backup") {
       if (isAuthRateLimited(clientIp(req))) return cors(json({ error: "Too many attempts. Try again later." }, 429), origin);
       const ctx = getAuthContextWithCsrf(req);
@@ -5605,7 +5723,7 @@ _server = Bun.serve({
       const passwordHash = await Bun.password.hash(password, { algorithm: "argon2id" });
       const now = Date.now();
 
-      // Check if user already exists — if so, add them to the org (verify password)
+      // Check if user already exists , if so, add them to the org (verify password)
       const existingUser = db.prepare("SELECT id, password_hash, token_version FROM users WHERE email = ?").get(invite.email) as { id: string; password_hash: string; token_version: number | null } | null;
 
       if (existingUser) {
@@ -5624,7 +5742,7 @@ _server = Bun.serve({
           const r = db.prepare("UPDATE invite_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL").run(now, invite.id);
           if (r.changes === 0) return false;
           db.prepare("INSERT INTO org_members (org_id, user_id, role) VALUES (?, ?, 'member')").run(invite.org_id, existingUser.id);
-          // Note: account_type is NOT upgraded here — existing users keep their current
+          // Note: account_type is NOT upgraded here , existing users keep their current
           // account_type. Only admins can change account types via the admin panel.
           // This prevents privilege escalation via invite acceptance.
           return true;
@@ -5665,7 +5783,7 @@ _server = Bun.serve({
       return authResponse({ user: { id: userId, email: invite.email, created_at: now, org_id: invite.org_id, role: "member" } }, token, origin, 201);
     }
 
-    // ---- POST /api/billing/webhook (BEFORE auth gate — Mollie sends no auth) ---
+    // ---- POST /api/billing/webhook (BEFORE auth gate , Mollie sends no auth) ---
     if (req.method === "POST" && path === "/api/billing/webhook") {
       // Cap request body size for unauthenticated webhook endpoint
       const cl = Number(req.headers.get("Content-Length") || 0);
@@ -5707,7 +5825,7 @@ _server = Bun.serve({
           return cors(json({ ok: true }), origin);
         }
 
-        // SECURITY: Idempotency check — skip if already processed
+        // SECURITY: Idempotency check , skip if already processed
         if (localPayment.status === "paid" && payment.status === "paid") {
           console.log(`[cookieproof-api] Webhook idempotency: payment ${paymentId} already processed`);
           return cors(json({ ok: true }), origin);
@@ -5785,7 +5903,7 @@ _server = Bun.serve({
           }
         }
 
-        // Handle subscription payments (recurring) — with idempotency check
+        // Handle subscription payments (recurring) , with idempotency check
         if (payment.status === "paid" && payment.subscriptionId) {
           const sub = db.prepare("SELECT * FROM subscriptions WHERE mollie_subscription_id = ?")
             .get(payment.subscriptionId) as any;
@@ -5887,7 +6005,7 @@ _server = Bun.serve({
         }
       }
 
-      // Only remove from this org — do NOT delete the user record (they may belong to other orgs)
+      // Only remove from this org , do NOT delete the user record (they may belong to other orgs)
       // Also revoke pending invites and disable scheduled reports they created for this org
       // Bump token_version to invalidate the removed member's existing JWTs
       db.transaction(() => {
@@ -6084,7 +6202,7 @@ _server = Bun.serve({
               throw new Error("DOMAIN_OWNED_BY_OTHER_ORG");
             }
             if (existingConfig.org_id && !orgId) {
-              // API key trying to overwrite an org-owned domain — block it
+              // API key trying to overwrite an org-owned domain , block it
               throw new Error("DOMAIN_OWNED_BY_OTHER_ORG");
             }
             db.prepare(
@@ -6135,7 +6253,7 @@ _server = Bun.serve({
         : listDomainsStmt.all() as { id: string; origin: string; created_at: number }[];
       const domains: { origin: string; source: "env" | "database" | "auto"; created_at: number | null }[] = [];
 
-      // Only show env-managed domains to admins — they're server-level, not per-org
+      // Only show env-managed domains to admins , they're server-level, not per-org
       const isAdmin = authCtx.type === "jwt" && (authCtx.accountType === "admin" || authCtx.accountType === "super_admin");
       const seen = new Set<string>();
       if (isAdmin) {
@@ -6397,7 +6515,7 @@ _server = Bun.serve({
       }
     }
 
-    // ---- GET /api/proof/analytics — enhanced analytics with trends ----------
+    // ---- GET /api/proof/analytics , enhanced analytics with trends ----------
     if (req.method === "GET" && path === "/api/proof/analytics") {
       const orgId = getOrgFilter(authCtx);
       if (!orgId) {
@@ -6546,7 +6664,7 @@ _server = Bun.serve({
       return cors(json({ telemetry, configFetches }), origin);
     }
 
-    // ---- GET /api/audit — audit log for user/org ----------------------------
+    // ---- GET /api/audit , audit log for user/org ----------------------------
     if (req.method === "GET" && path === "/api/audit") {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -6594,7 +6712,7 @@ _server = Bun.serve({
       return cors(json({ events: enrichedEvents, total, limit, offset }), origin);
     }
 
-    // ---- GET /api/webhooks — list webhooks for org --------------------------
+    // ---- GET /api/webhooks , list webhooks for org --------------------------
     if (req.method === "GET" && path === "/api/webhooks") {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -6620,7 +6738,7 @@ _server = Bun.serve({
       }), origin);
     }
 
-    // ---- POST /api/webhooks — create webhook --------------------------------
+    // ---- POST /api/webhooks , create webhook --------------------------------
     if (req.method === "POST" && path === "/api/webhooks") {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -6705,7 +6823,7 @@ _server = Bun.serve({
       }, 201), origin);
     }
 
-    // ---- PUT /api/webhooks/:id — update webhook -----------------------------
+    // ---- PUT /api/webhooks/:id , update webhook -----------------------------
     if (req.method === "PUT" && path.startsWith("/api/webhooks/") && path.split("/").length === 4) {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -6796,7 +6914,7 @@ _server = Bun.serve({
       return cors(json({ ok: true }), origin);
     }
 
-    // ---- DELETE /api/webhooks/:id — delete webhook --------------------------
+    // ---- DELETE /api/webhooks/:id , delete webhook --------------------------
     if (req.method === "DELETE" && path.startsWith("/api/webhooks/") && path.split("/").length === 4) {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -6826,7 +6944,7 @@ _server = Bun.serve({
       return cors(json({ ok: true, deleted: true }), origin);
     }
 
-    // ---- POST /api/webhooks/:id/test — test webhook -------------------------
+    // ---- POST /api/webhooks/:id/test , test webhook -------------------------
     if (req.method === "POST" && path.match(/^\/api\/webhooks\/[^/]+\/test$/)) {
       const ctx = getAuthContextWithCsrf(req);
       if (!ctx || ctx.type !== "jwt") {
@@ -7076,7 +7194,7 @@ _server = Bun.serve({
             'User-Agent': 'cookieproof-scanner/1.0',
             'Host': parsedScanUrl.hostname, // Preserve original Host header
           },
-          redirect: 'manual', // Don't follow redirects — prevents SSRF via redirect chain
+          redirect: 'manual', // Don't follow redirects , prevents SSRF via redirect chain
           signal: controller.signal,
         });
         clearTimeout(timeout);
@@ -7101,7 +7219,7 @@ _server = Bun.serve({
           return cors(json({ error: `Failed to fetch URL: ${response.status} ${response.statusText}` }, 502), origin);
         }
 
-        // Only scan HTML responses — reject PDFs, images, binaries, etc.
+        // Only scan HTML responses , reject PDFs, images, binaries, etc.
         const contentType = response.headers.get("Content-Type") || "";
         if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
           return cors(json({ error: `URL returned non-HTML content (${contentType.split(";")[0].trim() || "unknown"})` }, 400), origin);
@@ -7272,7 +7390,7 @@ _server = Bun.serve({
       const homeOrgId = homeOrg?.org_id || "";
 
       // Get client orgs where this user is owner (excluding their home org)
-      // Must be owner, not just member — prevents cross-agency data exposure
+      // Must be owner, not just member , prevents cross-agency data exposure
       const clientOrgs = db.prepare(`
         SELECT o.id, o.name, o.plan, o.trial_ends_at, o.grace_ends_at, o.created_by_agency, o.created_at,
           o.primary_contact_email,
@@ -7365,7 +7483,7 @@ _server = Bun.serve({
       }), origin);
     }
 
-    // ---- GET /api/agency/client-pricing — profit dashboard data -------------
+    // ---- GET /api/agency/client-pricing , profit dashboard data -------------
     if (req.method === "GET" && path === "/api/agency/client-pricing") {
       if (authCtx.type !== "jwt") return cors(json({ error: "JWT auth required" }, 403), origin);
       if (!isAgencyOrAdmin(authCtx)) return cors(json({ error: "Agency or admin access required" }, 403), origin);
@@ -7396,7 +7514,7 @@ _server = Bun.serve({
       }), origin);
     }
 
-    // ---- PUT /api/agency/client-pricing — set per-client fee & tier ---------
+    // ---- PUT /api/agency/client-pricing , set per-client fee & tier ---------
     if (req.method === "PUT" && path === "/api/agency/client-pricing") {
       if (authCtx.type !== "jwt") return cors(json({ error: "JWT auth required" }, 403), origin);
       if (!isAgencyOrAdmin(authCtx)) return cors(json({ error: "Agency or admin access required" }, 403), origin);
@@ -7437,7 +7555,7 @@ _server = Bun.serve({
       return cors(json({ ok: true }), origin);
     }
 
-    // ---- PUT /api/agency/primary-contact — set primary contact email --------
+    // ---- PUT /api/agency/primary-contact , set primary contact email --------
     if (req.method === "PUT" && path === "/api/agency/primary-contact") {
       if (authCtx.type !== "jwt") return cors(json({ error: "JWT auth required" }, 403), origin);
       if (!isAgencyOrAdmin(authCtx)) return cors(json({ error: "Agency or admin access required" }, 403), origin);
@@ -7466,7 +7584,7 @@ _server = Bun.serve({
       return cors(json({ ok: true }), origin);
     }
 
-    // ---- GET /api/agency/custom-domains — list agency's custom domains ------
+    // ---- GET /api/agency/custom-domains , list agency's custom domains ------
     if (req.method === "GET" && path === "/api/agency/custom-domains") {
       if (authCtx.type !== "jwt") return cors(json({ error: "JWT auth required" }, 403), origin);
       if (!isAgencyOrAdmin(authCtx)) return cors(json({ error: "Agency or admin access required" }, 403), origin);
@@ -7487,7 +7605,7 @@ _server = Bun.serve({
       }), origin);
     }
 
-    // ---- POST /api/agency/custom-domains — add a custom domain --------------
+    // ---- POST /api/agency/custom-domains , add a custom domain --------------
     if (req.method === "POST" && path === "/api/agency/custom-domains") {
       if (authCtx.type !== "jwt") return cors(json({ error: "JWT auth required" }, 403), origin);
       if (!isAgencyOrAdmin(authCtx)) return cors(json({ error: "Agency or admin access required" }, 403), origin);
@@ -7530,7 +7648,7 @@ _server = Bun.serve({
       }), origin);
     }
 
-    // ---- POST /api/agency/custom-domains/verify — check DNS CNAME -----------
+    // ---- POST /api/agency/custom-domains/verify , check DNS CNAME -----------
     if (req.method === "POST" && path === "/api/agency/custom-domains/verify") {
       if (authCtx.type !== "jwt") return cors(json({ error: "JWT auth required" }, 403), origin);
       if (!isAgencyOrAdmin(authCtx)) return cors(json({ error: "Agency or admin access required" }, 403), origin);
@@ -7577,7 +7695,7 @@ _server = Bun.serve({
       }), origin);
     }
 
-    // ---- DELETE /api/agency/custom-domains — remove a custom domain ---------
+    // ---- DELETE /api/agency/custom-domains , remove a custom domain ---------
     if (req.method === "DELETE" && path === "/api/agency/custom-domains") {
       if (authCtx.type !== "jwt") return cors(json({ error: "JWT auth required" }, 403), origin);
       if (!isAgencyOrAdmin(authCtx)) return cors(json({ error: "Agency or admin access required" }, 403), origin);
@@ -7860,7 +7978,7 @@ _server = Bun.serve({
       return cors(json({ ok: true }), origin);
     }
 
-    // ---- POST /api/agency/report (Phase B) — generate report -----------------
+    // ---- POST /api/agency/report (Phase B) , generate report -----------------
     if (req.method === "POST" && path === "/api/agency/report") {
       if (authCtx.type !== "jwt") return cors(json({ error: "JWT auth required" }, 403), origin);
       if (!isAgencyOrAdmin(authCtx)) return cors(json({ error: "Agency or admin access required" }, 403), origin);
@@ -7875,7 +7993,7 @@ _server = Bun.serve({
         return cors(json({ error: "Valid org_id is required" }, 400), origin);
       }
 
-      // Must be owner of the target org (no admin bypass — agency feature, not admin feature)
+      // Must be owner of the target org (no admin bypass , agency feature, not admin feature)
       const membership = db.prepare("SELECT 1 FROM org_members WHERE user_id = ? AND org_id = ? AND role = 'owner'").get(authCtx.userId, targetOrgId);
       if (!membership) return cors(json({ error: "Not authorized for this org" }, 403), origin);
 
@@ -7922,7 +8040,7 @@ _server = Bun.serve({
       }), origin);
     }
 
-    // ---- POST /api/agency/report/send (Phase B) — email report ---------------
+    // ---- POST /api/agency/report/send (Phase B) , email report ---------------
     if (req.method === "POST" && path === "/api/agency/report/send") {
       if (authCtx.type !== "jwt") return cors(json({ error: "JWT auth required" }, 403), origin);
       if (!isAgencyOrAdmin(authCtx)) return cors(json({ error: "Agency or admin access required" }, 403), origin);
@@ -7990,7 +8108,7 @@ _server = Bun.serve({
       const safeFilename = orgName.replace(/[^a-zA-Z0-9_-]/g, "_");
 
       const boundary = "----=_Part_" + randomUUID().replace(/-/g, "");
-      const subject = `Consent Compliance Report: ${orgName} (${fromDate} — ${toDate})`.replace(/[\r\n\t]/g, " ").slice(0, 200);
+      const subject = `Consent Compliance Report: ${orgName} (${fromDate} , ${toDate})`.replace(/[\r\n\t]/g, " ").slice(0, 200);
 
       const emailBody = [
         `From: ${smtp.from}`,
@@ -8006,7 +8124,7 @@ _server = Bun.serve({
         `Hello,`,
         ``,
         `Please find attached the consent compliance report for ${orgName}.`,
-        `Period: ${fromDate} — ${toDate}`,
+        `Period: ${fromDate} , ${toDate}`,
         ``,
         `Best regards,`,
         `${brandName}`,
@@ -8031,7 +8149,7 @@ _server = Bun.serve({
       }
     }
 
-    // ---- GET /api/agency/trends — daily consent data for sparklines --------
+    // ---- GET /api/agency/trends , daily consent data for sparklines --------
     if (req.method === "GET" && path === "/api/agency/trends") {
       if (authCtx.type !== "jwt") return cors(json({ error: "JWT auth required" }, 403), origin);
       if (!isAgencyOrAdmin(authCtx)) return cors(json({ error: "Agency or admin access required" }, 403), origin);
@@ -8248,7 +8366,7 @@ _server = Bun.serve({
               db.prepare("UPDATE org_members SET role = 'owner' WHERE org_id = ? AND user_id = ?").run(org_id, otherMember.user_id);
               db.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").run(org_id, targetUserId);
             } else {
-              // Sole member — safe to delete entire org
+              // Sole member , safe to delete entire org
               db.prepare("DELETE FROM consent_proofs WHERE domain IN (SELECT domain FROM domain_configs WHERE org_id = ?)").run(org_id);
               db.prepare("DELETE FROM domain_configs WHERE org_id = ?").run(org_id);
               db.prepare("DELETE FROM allowed_domains WHERE org_id = ?").run(org_id);
@@ -8507,7 +8625,7 @@ _server = Bun.serve({
         const org = db.prepare("SELECT name FROM orgs WHERE id = ?").get(targetOrgId) as { name: string | null } | null;
         const orgName = escHtml(org?.name || targetOrgId);
         const proofHtml = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Consent Proof Export — ${orgName}</title>
+<html><head><meta charset="utf-8"><title>Consent Proof Export , ${orgName}</title>
 <style>
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;padding:32px 24px;color:#1e293b;font-size:10px;line-height:1.4;}
   @page{size:A4 landscape;margin:0;}
@@ -8520,7 +8638,7 @@ _server = Bun.serve({
   tr:nth-child(even){background:#f8fafc;}
 </style></head><body>
 <h1>Consent Proof Export</h1>
-<p class="subtitle">${orgName} &mdash; ${pdfRows.length.toLocaleString()} records (exported ${new Date().toLocaleDateString("en-US")})</p>
+<p class="subtitle">${orgName} , ${pdfRows.length.toLocaleString()} records (exported ${new Date().toLocaleDateString("en-US")})</p>
 <table>
 <thead><tr><th>Domain</th><th>URL</th><th>Method</th><th>Categories</th><th>IP</th><th>Date</th></tr></thead>
 <tbody>
@@ -8580,7 +8698,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
       if (!org) return cors(json({ error: "Organization not found" }, 404), origin);
 
       if (data.action === "delete") {
-        // Hard delete — super_admin only
+        // Hard delete , super_admin only
         if (!isSuperAdmin(authCtx)) {
           return cors(json({ error: "Only super admins can permanently delete organizations" }, 403), origin);
         }
@@ -8625,7 +8743,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
     // BILLING ENDPOINTS
     // =========================================================================
 
-    // GET /api/billing/plans — list available pricing plans
+    // GET /api/billing/plans , list available pricing plans
     if (req.method === "GET" && path === "/api/billing/plans") {
       const plans = db.prepare(`
         SELECT id, name, price_cents, currency, interval, features
@@ -8645,7 +8763,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
       }), origin);
     }
 
-    // GET /api/billing/subscription — get current org subscription status
+    // GET /api/billing/subscription , get current org subscription status
     if (req.method === "GET" && path === "/api/billing/subscription") {
       if (authCtx.type !== "jwt") return cors(json({ error: "Unauthorized" }, 401), origin);
 
@@ -8690,7 +8808,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
       }), origin);
     }
 
-    // GET /api/billing/payments — list payment history
+    // GET /api/billing/payments , list payment history
     if (req.method === "GET" && path === "/api/billing/payments") {
       if (authCtx.type !== "jwt") return cors(json({ error: "Unauthorized" }, 401), origin);
 
@@ -8722,7 +8840,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
       }), origin);
     }
 
-    // POST /api/billing/subscribe — initiate subscription (creates Mollie checkout)
+    // POST /api/billing/subscribe , initiate subscription (creates Mollie checkout)
     if (req.method === "POST" && path === "/api/billing/subscribe") {
       if (authCtx.type !== "jwt") return cors(json({ error: "Unauthorized" }, 401), origin);
 
@@ -8754,7 +8872,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
         `).get(authCtx.orgId) as { id: string; plan_id: string; status: string } | null;
 
         if (existingSub) {
-          // Same plan — no change needed
+          // Same plan , no change needed
           if (existingSub.plan_id === plan_id) return { error: "same_plan" as const };
           // Upgrade/downgrade: cancel old subscription, create new one
           db.prepare(`UPDATE subscriptions SET status = 'canceled', canceled_at = ?, updated_at = ? WHERE id = ?`)
@@ -8860,7 +8978,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
       }
     }
 
-    // POST /api/billing/cancel — cancel subscription at period end
+    // POST /api/billing/cancel , cancel subscription at period end
     if (req.method === "POST" && path === "/api/billing/cancel") {
       if (authCtx.type !== "jwt") return cors(json({ error: "Unauthorized" }, 401), origin);
 
@@ -8909,7 +9027,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
       }), origin);
     }
 
-    // POST /api/billing/reactivate — reactivate a canceled subscription (before period ends)
+    // POST /api/billing/reactivate , reactivate a canceled subscription (before period ends)
     if (req.method === "POST" && path === "/api/billing/reactivate") {
       if (authCtx.type !== "jwt") return cors(json({ error: "Unauthorized" }, 401), origin);
 
@@ -8948,7 +9066,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
         .get(authCtx.orgId) as { plan: string; deletion_scheduled_at: number | null } | null;
 
       if (org && (org.plan === "expired" || org.plan === "grace")) {
-        // SECURITY: Prevent infinite free trial cycling — only allow reactivation if
+        // SECURITY: Prevent infinite free trial cycling , only allow reactivation if
         // the org has had a previous paid subscription or has never been reactivated before
         const hadPaidSub = db.prepare(
           "SELECT 1 FROM subscriptions WHERE org_id = ? AND status IN ('active', 'canceled', 'expired', 'pending') LIMIT 1"
@@ -8984,7 +9102,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
       return cors(json({ error: "No subscription to reactivate" }, 404), origin);
     }
 
-    // GET /api/billing/invoices — get invoice download links (via Mollie)
+    // GET /api/billing/invoices , get invoice download links (via Mollie)
     if (req.method === "GET" && path === "/api/billing/invoices") {
       if (authCtx.type !== "jwt") return cors(json({ error: "Unauthorized" }, 401), origin);
 
@@ -9009,7 +9127,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
       }), origin);
     }
 
-    // Admin: GET /api/admin/billing/subscriptions — list all subscriptions
+    // Admin: GET /api/admin/billing/subscriptions , list all subscriptions
     if (req.method === "GET" && path === "/api/admin/billing/subscriptions") {
       if (authCtx.type !== "jwt" || !isAdmin(authCtx)) {
         return cors(json({ error: "Admin access required" }, 403), origin);
@@ -9042,7 +9160,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
       return cors(json({ subscriptions: subs, total, limit, offset }), origin);
     }
 
-    // Admin: PUT /api/admin/billing/subscription/:id — manually update subscription status
+    // Admin: PUT /api/admin/billing/subscription/:id , manually update subscription status
     if (req.method === "PUT" && path.startsWith("/api/admin/billing/subscription/")) {
       if (authCtx.type !== "jwt" || !isSuperAdmin(authCtx)) {
         return cors(json({ error: "Super admin access required" }, 403), origin);
@@ -9083,7 +9201,7 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
       return cors(json({ ok: true, status }), origin);
     }
 
-    // Admin: GET /api/admin/billing/revenue — revenue stats
+    // Admin: GET /api/admin/billing/revenue , revenue stats
     if (req.method === "GET" && path === "/api/admin/billing/revenue") {
       if (authCtx.type !== "jwt" || !isAdmin(authCtx)) {
         return cors(json({ error: "Admin access required" }, 403), origin);
@@ -9155,30 +9273,30 @@ if (initialDomains.length > 0) {
   // Email
   if (RESEND_API_KEY) checks.push(ok("Email: Resend configured"));
   else if (SMTP_HOST) checks.push(ok("Email: SMTP configured"));
-  else checks.push(warn("Email: NOT configured — verification emails, password resets, and alerts will not be sent"));
+  else checks.push(warn("Email: NOT configured , verification emails, password resets, and alerts will not be sent"));
 
   // Billing
   if (MOLLIE_API_KEY && MOLLIE_WEBHOOK_URL && MOLLIE_REDIRECT_URL) checks.push(ok("Billing: Mollie fully configured"));
   else if (MOLLIE_API_KEY) checks.push(warn("Billing: MOLLIE_API_KEY set but missing MOLLIE_WEBHOOK_URL or MOLLIE_REDIRECT_URL"));
-  else checks.push(warn("Billing: Not configured — subscribe/billing endpoints disabled"));
+  else checks.push(warn("Billing: Not configured , subscribe/billing endpoints disabled"));
 
   // Gotenberg
   checks.push(ok(`PDF: Gotenberg at ${GOTENBERG_URL}`));
 
   // CORS
-  if (initialDomains.length === 0) checks.push(warn("CORS: No ALLOWED_ORIGINS — cross-origin requests will be blocked"));
+  if (initialDomains.length === 0) checks.push(warn("CORS: No ALLOWED_ORIGINS , cross-origin requests will be blocked"));
   else checks.push(ok(`CORS: ${initialDomains.length} allowed origin(s)`));
 
   // Data retention
   if (RETENTION_DAYS <= 0 || !Number.isFinite(RETENTION_DAYS)) {
-    console.error("[cookieproof-api] CRITICAL: RETENTION_DAYS is invalid — proofs may be purged immediately");
+    console.error("[cookieproof-api] CRITICAL: RETENTION_DAYS is invalid , proofs may be purged immediately");
     process.exit(1);
   }
   checks.push(ok(`Retention: ${RETENTION_DAYS} days`));
 
   // Admin
   if (ADMIN_EMAIL) checks.push(ok(`Admin: ${ADMIN_EMAIL}`));
-  else checks.push(warn("Admin: No ADMIN_EMAIL set — first registered user becomes owner"));
+  else checks.push(warn("Admin: No ADMIN_EMAIL set , first registered user becomes owner"));
 
   console.log(`\n[cookieproof-api] ═══ Startup Configuration ═══`);
   for (const c of checks) console.log(c);
@@ -9193,7 +9311,7 @@ console.log(`[cookieproof-api] Consent proof API running on :${PORT}`);
 async function gracefulShutdown(signal: string, exitCode = 0): Promise<void> {
   if (_shuttingDown) return;
   _shuttingDown = true;
-  console.log(`[cookieproof-api] ${signal} received — shutting down gracefully...`);
+  console.log(`[cookieproof-api] ${signal} received , shutting down gracefully...`);
 
   // Stop accepting new connections
   try {
@@ -9217,12 +9335,12 @@ async function gracefulShutdown(signal: string, exitCode = 0): Promise<void> {
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-// Global error handlers — prevent silent crashes
+// Global error handlers , prevent silent crashes
 process.on("uncaughtException", (err: any) => {
   console.error("[cookieproof-api] UNCAUGHT EXCEPTION:", err);
   gracefulShutdown("uncaughtException", 1);
 });
 process.on("unhandledRejection", (reason: any) => {
-  // Log but don't exit — async errors in email/webhook calls shouldn't crash the server
+  // Log but don't exit , async errors in email/webhook calls shouldn't crash the server
   console.error("[cookieproof-api] UNHANDLED REJECTION:", reason);
 });
