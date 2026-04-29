@@ -5,7 +5,7 @@ RUN apk add --no-cache su-exec && \
     addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app
-COPY server.ts entrypoint.sh ./
+COPY server.ts sharedsecret.ts entrypoint.sh ./
 COPY scanner/ ./scanner/
 RUN chmod +x entrypoint.sh
 
