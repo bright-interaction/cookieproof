@@ -226,7 +226,7 @@ export function getStyles(): string {
     .cc-btn-accept:hover {
       filter: brightness(1.1);
     }
-    /* IMY 2026: Reject has EQUAL visual weight — both buttons are solid filled */
+    /* IMY 2026: Reject has EQUAL visual weight; both buttons are solid filled */
     .cc-btn-reject {
       background: var(--cc-btn-reject-bg);
       color: var(--cc-btn-reject-text);

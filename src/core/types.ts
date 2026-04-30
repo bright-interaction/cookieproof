@@ -122,7 +122,7 @@ export interface CookieConsentConfig {
   proofEndpoint?: string;
   cookieDomain?: string;
   geoEndpoint?: string;
-  /** No UI rendered — ConsentManager, ScriptGate, and events still work. For custom UI implementations. */
+  /** No UI rendered .  ConsentManager, ScriptGate, and events still work. For custom UI implementations. */
   headless?: boolean;
   /** Days before consent expires to emit consent:expiring event. 0 = disabled (default). */
   expiryNotifyDays?: number;
@@ -151,6 +151,6 @@ export type ConsentEventType =
 export interface ConsentEventDetail {
   consent: ConsentRecord | null;
   changed?: string[];
-  /** Present in consent:expiring events — days until consent expires */
+  /** Present in consent:expiring events .  days until consent expires */
   daysRemaining?: number;
 }

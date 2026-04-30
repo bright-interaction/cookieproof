@@ -63,7 +63,7 @@ export class GCMBridge {
   /** Update consent signals based on category consent state */
   update(categories: Record<string, boolean>): void {
     if (!this.defaultsSet) {
-      console.warn('[cookieproof] GCMBridge.update() called before setDefaults() — calling setDefaults() automatically.');
+      console.warn('[cookieproof] GCMBridge.update() called before setDefaults(). Calling setDefaults() automatically.');
       this.setDefaults();
     }
     ensureGtag();

@@ -46,7 +46,7 @@ export const sv: TranslationStrings = {
     ariaLabel: 'Integritetsinställningar',
   },
   alwaysOnLabel: 'Alltid aktiv',
-  gpcNotice: 'Global Privacy Control-signal upptäckt — icke-nödvändiga cookies har blockerats.',
+  gpcNotice: 'Global Privacy Control-signal upptäckt. Icke-nödvändiga cookies har blockerats.',
   expiryNotice: 'Dina cookieinställningar går ut om {days} dagar. Vänligen granska dina val.',
   ccpa: {
     linkText: 'Sälj inte min personliga information',

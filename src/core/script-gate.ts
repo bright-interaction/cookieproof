@@ -121,7 +121,7 @@ export class ScriptGate {
         `See: https://docs.example.com/cookieproof/csp`
       );
     } catch {
-      // Web Crypto unavailable — skip silently
+      // Web Crypto unavailable .  skip silently
     }
   }
 
@@ -189,7 +189,7 @@ export class ScriptGate {
     this.activatedScripts.add(key);
 
     const replacement = document.createElement('script');
-    // Copy safe attributes — skip type, data-original-type, data-consent,
+    // Copy safe attributes .  skip type, data-original-type, data-consent,
     // and all on* event handler attributes (prevents XSS via onload/onerror)
     for (const attr of original.attributes) {
       if (attr.name === 'type' || attr.name === 'data-original-type' || attr.name === CONSENT_ATTR) continue;
@@ -254,7 +254,7 @@ export class ScriptGate {
     }
     // Note: cannot un-execute scripts. They will be blocked on next page load.
 
-    // Deactivate iframes — stop embedded content
+    // Deactivate iframes .  stop embedded content
     const iframes = document.querySelectorAll<HTMLIFrameElement>(
       `iframe[${CONSENT_ATTR}="${safe}"]`
     );
@@ -333,7 +333,7 @@ export class ScriptGate {
     }
 
     if (script.type === 'text/plain') {
-      // Already blocked by markup — activate if consented
+      // Already blocked by markup .  activate if consented
       if (this.consentState[category]) {
         this.activateScript(script);
       }
@@ -342,7 +342,7 @@ export class ScriptGate {
     // Warn developers about misconfigured markup so they can fix it.
     if (script.type !== 'text/plain') {
       console.warn(
-        `[cookieproof] Script with data-consent="${category}" has type="${script.type || 'text/javascript'}" — ` +
+        `[cookieproof] Script with data-consent="${category}" has type="${script.type || 'text/javascript'}". ` +
         'it may have already executed. Set type="text/plain" in markup to ensure blocking.'
       );
     }

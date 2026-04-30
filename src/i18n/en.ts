@@ -46,7 +46,7 @@ export const en: TranslationStrings = {
     ariaLabel: 'Privacy settings',
   },
   alwaysOnLabel: 'Always active',
-  gpcNotice: 'Global Privacy Control signal detected — non-essential cookies have been blocked.',
+  gpcNotice: 'Global Privacy Control signal detected. Non-essential cookies have been blocked.',
   expiryNotice: 'Your cookie preferences expire in {days} days. Please review your settings.',
   ccpa: {
     linkText: 'Do Not Sell or Share My Personal Information',

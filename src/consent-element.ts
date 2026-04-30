@@ -272,11 +272,11 @@ export class CookieConsentElement extends HTMLElement {
     const catIds = new Set<string>();
     categories = categories.filter((cat) => {
       if (!cat.id?.trim()) {
-        console.error('[cookieproof] Category with empty ID — skipping.');
+        console.error('[cookieproof] Category with empty ID; skipping.');
         return false;
       }
       if (catIds.has(cat.id)) {
-        console.error(`[cookieproof] Duplicate category ID "${cat.id}" — skipping duplicate.`);
+        console.error(`[cookieproof] Duplicate category ID "${cat.id}"; skipping duplicate.`);
         return false;
       }
       catIds.add(cat.id);
@@ -326,7 +326,7 @@ export class CookieConsentElement extends HTMLElement {
 
     // Warn if critical translation strings are empty
     if (!this.translations.banner.title?.trim()) {
-      console.warn('[cookieproof] banner.title is empty — dialog will not be labeled for screen readers.');
+      console.warn('[cookieproof] banner.title is empty; dialog will not be labeled for screen readers.');
     }
 
     // Apply theme
@@ -372,7 +372,7 @@ export class CookieConsentElement extends HTMLElement {
     const { needsBanner, gpcApplied } = this.manager.init();
 
     if (gpcApplied) {
-      // GPC auto-rejected — apply and show trigger for manual override
+      // GPC auto-rejected .  apply and show trigger for manual override
       const consent = this.manager.getConsent();
       if (consent) {
         this.scriptGate.updateConsent(consent.categories);
@@ -749,7 +749,7 @@ export class CookieConsentElement extends HTMLElement {
     // Use textContent (not innerHTML) to eliminate any XSS surface
     const p = document.createElement('p');
     Object.assign(p.style, { margin: '0', textAlign: 'center', color: 'var(--cc-text-secondary)', fontSize: '13px' });
-    const gpcText = this.translations.gpcNotice ?? 'Global Privacy Control signal detected — non-essential cookies have been blocked.';
+    const gpcText = this.translations.gpcNotice ?? 'Global Privacy Control signal detected. Non-essential cookies have been blocked.';
     p.textContent = '\u{1F6E1} ' + gpcText;
     notice.appendChild(p);
     this.shadowRoot!.appendChild(notice);
@@ -781,13 +781,13 @@ export class CookieConsentElement extends HTMLElement {
       .then((data: unknown) => {
         if (this.geoTimer) { clearTimeout(this.geoTimer); this.geoTimer = null; }
         if (!this.isConnected) return;
-        // Strictly validate the response shape — only skip banner when
+        // Strictly validate the response shape .  only skip banner when
         // the server explicitly returns { requiresConsent: false }.
         if (
           data && typeof data === 'object' && !Array.isArray(data) &&
           (data as Record<string, unknown>).requiresConsent === false
         ) {
-          // Region doesn't require consent — auto-accept all
+          // Region doesn't require consent .  auto-accept all
           this.acceptAll();
         } else {
           this.showBanner();
@@ -795,7 +795,7 @@ export class CookieConsentElement extends HTMLElement {
       })
       .catch(() => {
         if (this.geoTimer) { clearTimeout(this.geoTimer); this.geoTimer = null; }
-        // Fail-safe: show banner if geo check fails — but only if still mounted
+        // Fail-safe: show banner if geo check fails .  but only if still mounted
         if (!this.isConnected) return;
         this.showBanner();
       });
@@ -808,7 +808,7 @@ export class CookieConsentElement extends HTMLElement {
         'forced to "left". Users must have a way to change their consent at any time. ' +
         'Override this by providing your own consent-change UI and setting floatingTrigger to "left" or "right".'
       );
-      // Avoid mutating the caller's config object — write to our own copy
+      // Avoid mutating the caller's config object .  write to our own copy
       this.config = { ...this.config, floatingTrigger: 'left' };
     }
   }

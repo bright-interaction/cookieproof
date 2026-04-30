@@ -145,7 +145,7 @@ export class StorageAdapter {
         try {
           return decodeURIComponent(trimmed.substring(prefix.length));
         } catch {
-          // Malformed cookie value (e.g. bare % characters) — treat as absent
+          // Malformed cookie value (e.g. bare % characters) .  treat as absent
           return null;
         }
       }

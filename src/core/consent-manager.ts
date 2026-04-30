@@ -31,7 +31,7 @@ export class ConsentManager {
     if (config.proofEndpoint && /^https:\/\//i.test(config.proofEndpoint)) {
       this.proofEndpoint = config.proofEndpoint;
     } else if (config.proofEndpoint) {
-      console.warn('[cookieproof] proofEndpoint must use HTTPS — proof delivery disabled.');
+      console.warn('[cookieproof] proofEndpoint must use HTTPS; proof delivery disabled.');
     }
     this.respectGPC = config.respectGPC !== false; // default true
   }
@@ -40,7 +40,7 @@ export class ConsentManager {
     this.record = this.storage.load();
 
     if (this.record && this.record.version !== this.revision) {
-      // Policy changed — re-ask
+      // Policy changed .  re-ask
       this.record = null;
       this.storage.clear();
       try { localStorage.removeItem('ce_signals'); } catch { /* ignore */ }
@@ -237,7 +237,7 @@ export class ConsentManager {
     this.storage.save(this.record);
     this.sendProof(this.record);
 
-    // Defensive copy for events and return value — prevents callback mutation
+    // Defensive copy for events and return value .  prevents callback mutation
     // from corrupting internal state (this.record is the live reference)
     const snapshot: ConsentRecord = { ...this.record, categories: { ...this.record.categories } };
     const detail: ConsentEventDetail = { consent: snapshot, changed };
@@ -282,7 +282,7 @@ export class ConsentManager {
         const blob = new Blob([payload], { type: 'application/json' });
         return navigator.sendBeacon(this.proofEndpoint!, blob);
       }
-      // fetch is fire-and-forget — we can't know if it succeeds, so return false
+      // fetch is fire-and-forget .  we can't know if it succeeds, so return false
       // to ensure the proof is queued as a safety net. Duplicates are harmless
       // (server uses UUID, and proofs are idempotent).
       fetch(this.proofEndpoint!, {
@@ -307,18 +307,18 @@ export class ConsentManager {
         // Validate all items are strings (guard against corrupted data)
         queue = queue.filter((item): item is string => typeof item === 'string');
       } catch {
-        // Corrupted queue — reset it
+        // Corrupted queue .  reset it
         console.warn('[cookieproof] Corrupted proof queue cleared');
         queue = [];
       }
       if (queue.length >= 50) {
-        console.warn('[cookieproof] Proof queue full (50 items) — oldest entry dropped');
+        console.warn('[cookieproof] Proof queue full (50 items); oldest entry dropped');
         queue.shift();
       }
       queue.push(payload);
       localStorage.setItem(ConsentManager.PROOF_QUEUE_KEY, JSON.stringify(queue));
     } catch {
-      // Storage unavailable (incognito) — accept the loss
+      // Storage unavailable (incognito) .  accept the loss
     }
   }
 
@@ -333,7 +333,7 @@ export class ConsentManager {
         if (!Array.isArray(queue)) throw new Error('not array');
         queue = queue.filter((item): item is string => typeof item === 'string');
       } catch {
-        // Corrupted queue — clear it
+        // Corrupted queue .  clear it
         localStorage.removeItem(ConsentManager.PROOF_QUEUE_KEY);
         return;
       }
@@ -352,7 +352,7 @@ export class ConsentManager {
         localStorage.removeItem(ConsentManager.PROOF_QUEUE_KEY);
       }
     } catch {
-      // Storage unavailable — clear to prevent stuck queue
+      // Storage unavailable .  clear to prevent stuck queue
       try { localStorage.removeItem(ConsentManager.PROOF_QUEUE_KEY); } catch { /* ignore */ }
     }
   }

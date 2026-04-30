@@ -6,7 +6,7 @@ export interface BannerCallbacks {
   onRejectAll: () => void;
   onSettings: () => void;
   onDoNotSell?: () => void;
-  /** Called when user presses Escape — should hide without making consent decision */
+  /** Called when user presses Escape .  should hide without making consent decision */
   onDismiss?: () => void;
 }
 

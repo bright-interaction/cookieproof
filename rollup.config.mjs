@@ -49,6 +49,37 @@ export default [
       }),
     ],
   },
+  // Embed bundle — single-file widget + inline-config loader.
+  // Used by Atomic Site (and any host that embeds CookieProof same-origin).
+  // Reads window.__CCB__ for config; posts proofs to a host-controlled endpoint.
+  {
+    input: 'src/embed.ts',
+    output: [
+      {
+        file: 'dist/cookieproof.embed.esm.js',
+        format: 'es',
+      },
+      {
+        file: 'dist/cookieproof.embed.iife.js',
+        format: 'iife',
+        name: 'CookieProofEmbed',
+      },
+    ],
+    plugins: [
+      typescript({
+        tsconfig: './tsconfig.json',
+        declaration: false,
+        declarationDir: undefined,
+        compilerOptions: {
+          declaration: false,
+          declarationDir: undefined,
+        },
+      }),
+      terser({
+        format: { comments: false },
+      }),
+    ],
+  },
   // Integrations bundle
   ...integrationModules.map((mod) => ({
     input: `integrations/${mod}.ts`,
