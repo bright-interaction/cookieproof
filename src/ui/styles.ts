@@ -241,7 +241,9 @@ export function getStyles(): string {
       border-color: var(--cc-btn-secondary-bg);
     }
     .cc-btn-settings:hover {
-      background: var(--cc-btn-secondary-hover, #b8bec6);
+      background: color-mix(in oklab, var(--cc-btn-secondary-bg) 88%, white 12%);
+      border-color: color-mix(in oklab, var(--cc-btn-secondary-bg) 88%, white 12%);
+      filter: brightness(1.05);
     }
 
     /* ---- Preferences (Layer 2) ---- */
