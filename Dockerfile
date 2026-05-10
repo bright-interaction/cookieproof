@@ -13,6 +13,14 @@ RUN bun run build && \
 # Use unprivileged nginx image for security
 FROM nginxinc/nginx-unprivileged:alpine
 
+# Pull current Alpine security patches the upstream image hasn't
+# rebuilt with yet. Trivy with severity=CRITICAL + ignore-unfixed
+# flags the stale base every run otherwise. nginx-unprivileged sets
+# USER nginx in the base; switch to root for the upgrade then back.
+USER root
+RUN apk update && apk upgrade --no-cache && rm -rf /var/cache/apk/*
+USER nginx
+
 # Copy nginx config (adjusted for non-root)
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
