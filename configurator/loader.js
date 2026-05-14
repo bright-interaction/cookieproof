@@ -227,7 +227,7 @@
     }
     document.body.appendChild(el);
     if (el.configure) el.configure(cfg);
-    else customElements.whenDefined('cookie-consent').then(function () { el.configure(cfg); });
+    else customElements.whenDefined('cookie-consent').then(function () { el.configure(cfg); }).catch(function (e) { console.error('[cookieproof] configure failed:', e && e.message); });
     return el;
   }
 
