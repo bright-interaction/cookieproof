@@ -165,32 +165,6 @@ async function migrate() {
   console.log("=".repeat(60));
 }
 
-// =============================================================================
-// Export individual tables (for manual migration)
-// =============================================================================
-
-async function exportTable(sqlite: BunSQLite, table: string): Promise<string> {
-  const rows = sqlite.prepare(`SELECT * FROM ${table}`).all();
-  if (rows.length === 0) return "";
-
-  const columns = Object.keys(rows[0] as Record<string, unknown>);
-  const header = columns.join(",");
-
-  const lines = rows.map((row: any) => {
-    return columns.map((col) => {
-      const val = row[col];
-      if (val === null) return "";
-      if (typeof val === "string") {
-        // Escape quotes and wrap in quotes
-        return `"${val.replace(/"/g, '""')}"`;
-      }
-      return String(val);
-    }).join(",");
-  });
-
-  return [header, ...lines].join("\n");
-}
-
 // Run migration
 migrate().catch((err) => {
   console.error("Migration failed:", err);

@@ -173,10 +173,20 @@ function init(): void {
   if (el.configure) {
     el.configure(widgetConfig);
   } else {
-    customElements.whenDefined('cookie-consent').then(() => {
-      const e = el as HTMLElement & { configure: (c: CookieConsentConfig) => void };
-      e.configure(widgetConfig);
-    });
+    // Same shape as the configurator/loader.js fix at commit e7eac03c
+    // (2026-05-14 pre-flight). Without the .catch, a customElements
+    // registration rejection or a throw inside configure() would
+    // surface as an unhandled promise rejection in the host page.
+    customElements
+      .whenDefined('cookie-consent')
+      .then(() => {
+        const e = el as HTMLElement & { configure: (c: CookieConsentConfig) => void };
+        e.configure(widgetConfig);
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[cookieproof-embed] configure failed:', err && (err as Error).message);
+      });
   }
 
   // Proof relay. `consent:update` fires for accept/reject/custom/GPC and cross-tab changes.

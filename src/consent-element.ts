@@ -58,9 +58,17 @@ export class CookieConsentElement extends HTMLElement {
     if (this.initialized) return;
     // Use microtask (not RAF) to minimise the window where scripts can slip through.
     // This still allows configure() to be called synchronously after insertion.
-    Promise.resolve().then(() => {
-      if (!this.initialized && this.isConnected) this.init(this.config);
-    });
+    // The .catch matches the embed.ts + loader.js (e7eac03c) pattern so an
+    // init() throw is logged instead of surfacing as an unhandled rejection
+    // on the host page (which can wedge integrators' error-reporting tools).
+    Promise.resolve()
+      .then(() => {
+        if (!this.initialized && this.isConnected) this.init(this.config);
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[cookieproof] init failed:', err && (err as Error).message);
+      });
   }
 
   disconnectedCallback(): void {

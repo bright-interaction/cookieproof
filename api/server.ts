@@ -2561,9 +2561,13 @@ CookieProof by Bright Interaction , GDPR &amp; IMY 2026 Compliant Cookie Consent
     const formData = new FormData();
     formData.append("files", new Blob([htmlContent], { type: "text/html" }), "index.html");
 
+    // 30s timeout: Gotenberg PDF renders are CPU-bound (Chromium) and
+    // can stall on a runaway page; without an abort signal the request
+    // hangs indefinitely and depletes the Bun request pool.
     const pdfRes = await fetch(`${GOTENBERG_URL}/forms/chromium/convert/html`, {
       method: "POST",
       body: formData,
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!pdfRes.ok) {
@@ -3946,12 +3950,17 @@ function getSmtpConfig(agencyUserId?: string): { host: string; port: number; use
 // Resend API email sender
 // ---------------------------------------------------------------------------
 async function sendResendEmail(to: string, subject: string, html: string, text?: string): Promise<void> {
+  // 10s timeout: external email API; without an abort the request can
+  // hang on Resend network issues and block whatever invoked the send
+  // (password reset, invite, billing reminder) until the connection
+  // eventually times out at the OS level.
   const resp = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${RESEND_API_KEY}`,
       "Content-Type": "application/json",
     },
+    signal: AbortSignal.timeout(10_000),
     body: JSON.stringify({
       from: RESEND_FROM,
       to: [to],
