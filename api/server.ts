@@ -342,20 +342,28 @@ let _jwtSecret: string | null = null;
 
 function getJwtSecret(): string {
   if (_jwtSecret) return _jwtSecret;
-  if (process.env.JWT_SECRET) { _jwtSecret = process.env.JWT_SECRET; return _jwtSecret; }
+  if (process.env.JWT_SECRET) {
+    if (process.env.JWT_SECRET.length < 32) {
+      throw new Error("JWT_SECRET must be at least 32 characters");
+    }
+    _jwtSecret = process.env.JWT_SECRET;
+    return _jwtSecret;
+  }
+  // Backward-compat: honor a secret minted by an older build, but NEVER mint a new
+  // one. A missing signing secret is a hard failure, not a silent self-mint: a key
+  // living in the app DB is forgeable if the DB ever leaks (security.md: auth
+  // secrets absent => refuse to run, not optional).
   const row = db.prepare("SELECT value FROM settings WHERE key = 'jwt_secret'").get() as { value: string } | null;
-  if (row) { _jwtSecret = row.value; return _jwtSecret; }
-  const secret = randomBytes(32).toString("hex");
-  db.prepare("INSERT INTO settings (key, value) VALUES ('jwt_secret', ?)").run(secret);
-  _jwtSecret = secret;
-  return secret;
+  if (row && row.value) { _jwtSecret = row.value; return _jwtSecret; }
+  throw new Error("JWT_SECRET is not set. Refusing to run without a configured signing secret.");
 }
 
 function signJwt(payload: Record<string, unknown>, expiresInSec = 7 * 24 * 3600): string {
   const secret = getJwtSecret();
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
   const iat = Math.floor(Date.now() / 1000);
-  const body = Buffer.from(JSON.stringify({ ...payload, iat, exp: iat + expiresInSec })).toString("base64url");
+  // jti uniquely identifies this token so logout can revoke it (revoked_tokens).
+  const body = Buffer.from(JSON.stringify({ ...payload, jti: randomBytes(16).toString("hex"), iat, exp: iat + expiresInSec })).toString("base64url");
   const sig = createHmac("sha256", secret).update(header + "." + body).digest("base64url");
   return header + "." + body + "." + sig;
 }
@@ -778,6 +786,15 @@ function isPrivateHost(hostname: string): boolean {
       if (/^f[cd]/i.test(expanded)) return true;
       // Discard prefix 100::/64
       if (expanded.startsWith('0100:0000:0000:0000:')) return true;
+      // IPv4-mapped IPv6 in hex-group form (::ffff:HHHH:HHHH), e.g.
+      // ::ffff:0a00:0001 == 10.0.0.1 . The dotted-decimal mappedV4Patterns above
+      // miss this form, so reconstruct the embedded IPv4 and re-check it.
+      const mappedHex = expanded.match(/^0000:0000:0000:0000:0000:ffff:([0-9a-f]{4}):([0-9a-f]{4})$/i);
+      if (mappedHex) {
+        const hi = parseInt(mappedHex[1], 16), lo = parseInt(mappedHex[2], 16);
+        const v4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+        if (isPrivateHost(v4)) return true;
+      }
     }
   }
 
@@ -796,17 +813,65 @@ async function resolveAndCheckHost(hostname: string): Promise<string | null> {
     return isPrivateHost(hostname) ? null : hostname;
   }
   try {
-    const results = await Bun.dns.resolve(hostname, "A");
-    if (!results || results.length === 0) return null;
-    for (const record of results) {
-      const addr = typeof record === 'string' ? record : (record as any).address;
+    const addrOf = (r: any): string | undefined => (typeof r === 'string' ? r : r?.address);
+    // Resolve BOTH A (IPv4) and AAAA (IPv6). A private result on EITHER family is
+    // unsafe; an AAAA-only internal host must not slip past an IPv4-only check.
+    const [aRes, aaaaRes] = await Promise.allSettled([
+      Bun.dns.resolve(hostname, "A"),
+      Bun.dns.resolve(hostname, "AAAA"),
+    ]);
+    const a = aRes.status === "fulfilled" && Array.isArray(aRes.value) ? aRes.value : [];
+    const aaaa = aaaaRes.status === "fulfilled" && Array.isArray(aaaaRes.value) ? aaaaRes.value : [];
+    const all = [...a, ...aaaa];
+    if (all.length === 0) return null;
+    for (const record of all) {
+      const addr = addrOf(record);
       if (!addr || isPrivateHost(addr)) return null;
     }
-    // Return the first resolved IP for pinning
-    const first = results[0];
-    return typeof first === 'string' ? first : (first as any).address;
+    // Pin to the first IPv4 if present (broadest fetch compatibility), else IPv6.
+    return (a.length ? addrOf(a[0]) : addrOf(all[0])) || null;
   } catch {
     return null; // DNS resolution failed , treat as unsafe
+  }
+}
+
+/**
+ * SSRF-guarded outbound POST for customer/operator webhooks. Resolves the host
+ * (A+AAAA), rejects any private/internal resolved IP (defeats DNS-rebinding),
+ * pins the connection to the validated IP for http (preserving the Host header),
+ * and never follows redirects. Throws on an unsafe host. For https the original
+ * host is kept so TLS validates correctly, after the resolved IPs were confirmed
+ * public immediately before the fetch.
+ */
+async function guardedWebhookFetch(
+  rawUrl: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number } = {}
+): Promise<Response> {
+  const u = new URL(rawUrl);
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("blocked-scheme");
+  if (isPrivateHost(u.hostname)) throw new Error("blocked-private-host");
+  const safeIp = await resolveAndCheckHost(u.hostname);
+  if (!safeIp) throw new Error("blocked-resolved-private");
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), init.timeoutMs ?? 10_000);
+  try {
+    const headers: Record<string, string> = { ...(init.headers || {}) };
+    let target = rawUrl;
+    if (u.protocol === "http:") {
+      const pinned = new URL(rawUrl);
+      pinned.hostname = safeIp;
+      target = pinned.toString();
+      headers["Host"] = u.hostname;
+    }
+    return await fetch(target, {
+      method: init.method ?? "POST",
+      headers,
+      body: init.body,
+      redirect: "manual",
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(t);
   }
 }
 
@@ -1181,6 +1246,82 @@ function resetTotpFailures(userId: string): void {
 setInterval(() => {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000; // 24 hours old
   db.prepare("DELETE FROM totp_failures WHERE updated_at < ? AND locked_until IS NULL").run(cutoff);
+}, 60 * 60 * 1000);
+
+// SECURITY: Per-account password failure tracking (independent of IP-based rate
+// limiting, which can be unreliable behind misconfigured proxies). Lock the
+// account for 15 minutes after 5 wrong-password attempts. Mirrors totp_failures.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS password_failures (
+    user_id    TEXT PRIMARY KEY,
+    failures   INTEGER NOT NULL DEFAULT 0,
+    locked_until INTEGER,
+    updated_at INTEGER NOT NULL
+  )
+`);
+const PASSWORD_MAX_FAILURES = 5;
+const PASSWORD_LOCKOUT_MS = 15 * 60 * 1000;
+
+function isPasswordLocked(userId: string): boolean {
+  const row = db.prepare("SELECT locked_until FROM password_failures WHERE user_id = ?")
+    .get(userId) as { locked_until: number | null } | null;
+  if (!row || !row.locked_until) return false;
+  return Date.now() < row.locked_until;
+}
+
+function recordPasswordFailure(userId: string): void {
+  const now = Date.now();
+  const row = db.prepare("SELECT failures, locked_until FROM password_failures WHERE user_id = ?")
+    .get(userId) as { failures: number; locked_until: number | null } | null;
+  if (!row) {
+    db.prepare("INSERT INTO password_failures (user_id, failures, updated_at) VALUES (?, 1, ?)").run(userId, now);
+    return;
+  }
+  if (row.locked_until && now < row.locked_until) return; // already locked
+  const newFailures = row.failures + 1;
+  if (newFailures >= PASSWORD_MAX_FAILURES) {
+    db.prepare("UPDATE password_failures SET failures = ?, locked_until = ?, updated_at = ? WHERE user_id = ?")
+      .run(newFailures, now + PASSWORD_LOCKOUT_MS, now, userId);
+    console.warn(`[SECURITY] Password login locked for user ${userId} after ${newFailures} failures`);
+  } else {
+    db.prepare("UPDATE password_failures SET failures = ?, updated_at = ? WHERE user_id = ?")
+      .run(newFailures, now, userId);
+  }
+}
+
+function resetPasswordFailures(userId: string): void {
+  db.prepare("DELETE FROM password_failures WHERE user_id = ?").run(userId);
+}
+
+// SECURITY: Per-token JWT revocation list (logout invalidates the specific token).
+// Sessions are stateless JWTs, so a stolen token would otherwise survive logout
+// until exp; this table lets logout revoke just that jti. Rows expire with the token.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS revoked_tokens (
+    jti        TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+  )
+`);
+
+function isTokenRevoked(jti: string): boolean {
+  const row = db.prepare("SELECT 1 FROM revoked_tokens WHERE jti = ?").get(jti) as unknown;
+  return !!row;
+}
+
+function revokeToken(token: string): void {
+  try {
+    const payload = verifyJwt(token);
+    if (!payload || typeof payload.jti !== "string") return;
+    const exp = typeof payload.exp === "number" ? payload.exp * 1000 : Date.now() + 7 * 24 * 3600 * 1000;
+    db.prepare("INSERT OR IGNORE INTO revoked_tokens (jti, expires_at) VALUES (?, ?)").run(payload.jti, exp);
+  } catch { /* ignore malformed token on logout */ }
+}
+
+// Clean up expired records hourly (password lockouts + revoked tokens past exp).
+setInterval(() => {
+  const now = Date.now();
+  db.prepare("DELETE FROM password_failures WHERE updated_at < ? AND locked_until IS NULL").run(now - 24 * 60 * 60 * 1000);
+  db.prepare("DELETE FROM revoked_tokens WHERE expires_at < ?").run(now);
 }, 60 * 60 * 1000);
 
 // Audit log table
@@ -2898,21 +3039,15 @@ function fireWebhook(proof: { id: string; domain: string; url: string; method: s
     if (webhookSigner.configured()) {
       headers["X-Webhook-Signature"] = webhookSigner.sign(body);
     }
-    const controller = new AbortController();
-    const webhookTimeout = setTimeout(() => controller.abort(), 10_000);
-    fetch(WEBHOOK_URL, {
-      method: "POST",
-      headers,
-      body,
-      redirect: "manual",
-      signal: controller.signal,
-    }).then(res => {
+    // SSRF-guarded: resolves + rejects private/internal IPs and pins the
+    // connection (defeats DNS-rebinding even though WEBHOOK_URL is operator-set).
+    guardedWebhookFetch(WEBHOOK_URL, { headers, body }).then(res => {
       if (!res.ok) console.warn(`[webhook] POST failed: ${res.status} ${res.statusText}`);
     }).catch((err) => {
       if (err?.name !== 'AbortError') {
         console.warn(`[webhook] POST error: ${err?.message || 'unknown'}`);
       }
-    }).finally(() => clearTimeout(webhookTimeout));
+    });
   } catch (e: any) { console.warn(`[webhook] Error: ${e?.message || 'unknown'}`); }
 }
 
@@ -2961,16 +3096,9 @@ function fireCustomerWebhooks(
         headers["X-Webhook-Signature"] = createHmac("sha256", webhook.secret).update(body).digest("hex");
       }
 
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
-
-      fetch(webhook.url, {
-        method: "POST",
-        headers,
-        body,
-        redirect: "manual",
-        signal: controller.signal,
-      }).then(res => {
+      // SSRF-guarded: resolves the customer URL and rejects any private/internal
+      // resolved IP at fire time (defeats DNS-rebinding past the create-time check).
+      guardedWebhookFetch(webhook.url, { headers, body }).then(res => {
         const now = Date.now();
         if (res.ok) {
           db.prepare(
@@ -3000,7 +3128,7 @@ function fireCustomerWebhooks(
             console.warn(`[customer-webhook] Disabled ${webhook.id} after 10 consecutive failures`);
           }
         }
-      }).finally(() => clearTimeout(timeout));
+      });
     }
   } catch (e: any) {
     console.warn(`[customer-webhook] Error: ${e?.message || 'unknown'}`);
@@ -3053,7 +3181,14 @@ function cors(res: Response, origin: string): Response {
   res.headers.set("Access-Control-Allow-Origin", allowedOrigin);
   res.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.headers.set("Access-Control-Allow-Headers", `Content-Type, Authorization, ${CSRF_HEADER_NAME}`);
-  res.headers.set("Access-Control-Allow-Credentials", "true");
+  // SECURITY: only first-party (env-configured) origins may read CREDENTIALED
+  // responses. Tenant-supplied domains live in the same global allow-list and any
+  // org can add one (POST /api/settings/domains), so reflecting them WITH
+  // credentials would let a poisoned origin read another tenant's authenticated
+  // data. The unauthenticated widget proof/config flow needs no credentials.
+  if (ENV_ORIGINS.includes(allowedOrigin)) {
+    res.headers.set("Access-Control-Allow-Credentials", "true");
+  }
   return res;
 }
 
@@ -3122,6 +3257,8 @@ function getAuthContext(req: Request): AuthContext | null {
   if (token.includes(".")) {
     const payload = verifyJwt(token);
     if (payload && payload.sub) {
+      // Reject tokens explicitly revoked at logout (per-jti revocation list)
+      if (typeof payload.jti === "string" && isTokenRevoked(payload.jti)) return null;
       // Reject JWTs with stale token_version (bumped on password change)
       const userRow = db.prepare("SELECT token_version, account_type, status FROM users WHERE id = ?").get(payload.sub as string) as { token_version: number | null; account_type: string; status: string } | null;
       if (!userRow || userRow.status === 'archived') return null;
@@ -3504,18 +3641,33 @@ function computeHealthScore(orgId: string): number {
   return score;
 }
 
-// TRUST_PROXY should be enabled when behind a reverse proxy (Traefik, nginx, etc.)
-// Default to true if not explicitly set to "false" - safer for most deployments
+// TRUST_PROXY gates whether forwarding headers are honored at all. Even when
+// enabled, a header is only trusted if the DIRECT socket peer is a trusted proxy
+// (an internal/private address, or one listed in TRUSTED_PROXY_IPS). A direct
+// external client's peer is public, so its spoofed X-Forwarded-For / X-Real-IP /
+// CF-Connecting-IP are ignored and its real socket IP is used instead. This makes
+// header-spoofing brute-force and rate-limit-map flooding impossible regardless of
+// TRUST_PROXY, while still surfacing the real client behind nginx. (security.md:
+// never trust forwarding headers without configuring trusted proxy addresses.)
 const TRUST_PROXY = process.env.TRUST_PROXY !== "false";
+const TRUSTED_PROXY_IPS = new Set(
+  (process.env.TRUSTED_PROXY_IPS || "").split(",").map(s => s.trim()).filter(Boolean)
+);
+
+function isTrustedProxyPeer(peer: string | undefined): boolean {
+  if (!peer) return false;
+  if (TRUSTED_PROXY_IPS.has(peer)) return true;
+  // The reverse proxy dials us from the internal network (a private address).
+  // A public peer is a direct, un-proxied client whose headers must not be trusted.
+  return isPrivateHost(peer);
+}
 
 function clientIp(req: Request): string {
-  if (TRUST_PROXY) {
-    // X-Real-IP is set by the reverse proxy and is trusted
+  const peer = _server?.requestIP(req)?.address || undefined;
+  if (TRUST_PROXY && isTrustedProxyPeer(peer)) {
+    // X-Real-IP is set by the reverse proxy (and overwrites any client value).
     const realIp = req.headers.get("X-Real-IP")?.trim();
     if (realIp && realIp.length <= 45 && /^[\da-fA-F.:]+$/.test(realIp)) return realIp;
-    // X-Forwarded-For: use leftmost entry (original client IP)
-    // When behind a single trusted proxy, leftmost is the real client
-    // Format: client, proxy1, proxy2, ... (leftmost = original)
     const xff = req.headers.get("X-Forwarded-For");
     if (xff) {
       const parts = xff.split(",").map(s => s.trim()).filter(Boolean);
@@ -3523,12 +3675,11 @@ function clientIp(req: Request): string {
         return parts[0];
       }
     }
-    // Cloudflare-specific header
     const cfIp = req.headers.get("CF-Connecting-IP")?.trim();
     if (cfIp && cfIp.length <= 45 && /^[\da-fA-F.:]+$/.test(cfIp)) return cfIp;
   }
-  // Fallback: generate a unique identifier per request to still enable some rate limiting
-  // This is not ideal but better than grouping all requests as "unknown"
+  // Not behind a trusted proxy (or proxy trust disabled): use the real socket peer.
+  if (peer) return peer;
   const fallbackId = req.headers.get("User-Agent")?.slice(0, 50) || "direct";
   return `unknown-${fallbackId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 20)}`;
 }
@@ -3871,10 +4022,19 @@ async function sendSmtpEmail(
   const net = await import("net");
   const tls = await import("tls");
 
+  // SSRF hardening: resolve the host and reject any private/internal IP, then pin
+  // the raw TCP connection to the validated IP. TLS below still validates the
+  // ORIGINAL hostname (servername: host), so cert checks stay correct. This is a
+  // raw-socket primitive (arbitrary host:port), so an unpinned dial is a stronger
+  // SSRF than fetch; pinning here defeats DNS-rebinding to internal services.
+  if (isPrivateHost(host)) throw new Error("SMTP host is a private/internal address");
+  const pinnedIp = await resolveAndCheckHost(host);
+  if (!pinnedIp) throw new Error("SMTP host resolves to a private/internal address");
+
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => { socket?.destroy(); reject(new Error("SMTP timeout")); }, 30_000);
 
-    let socket: any = net.createConnection({ host, port }, () => {});
+    let socket: any = net.createConnection({ host: pinnedIp, port }, () => {});
     let buffer = "";
     let step = 0; // 0=connect, 1=ehlo, 2=starttls, 3=ehlo2, 4=auth, 5=user, 6=pass, 7=from, 8=rcpt, 9=data, 10=body, 11=quit
 
@@ -4068,6 +4228,17 @@ async function sendEmail(
 // ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
+
+// SECURITY: a JWT signing secret is mandatory (env, or a secret minted by an
+// older build and stored in settings). Fail fast at boot rather than on the
+// first auth request, and never silently self-mint a forgeable key.
+try {
+  getJwtSecret();
+} catch (e: any) {
+  console.error(`[cookieproof-api] CRITICAL: ${e?.message || "JWT secret unavailable"}`);
+  process.exit(1);
+}
+
 _server = Bun.serve({
   port: PORT,
 
@@ -4528,6 +4699,11 @@ _server = Bun.serve({
       }
 
       const user = db.prepare("SELECT id, email, password_hash, created_at, token_version, account_type, display_name, status, email_verified_at, totp_secret, totp_enabled_at FROM users WHERE email = ?").get(email) as { id: string; email: string; password_hash: string; created_at: number; token_version: number | null; account_type: string; display_name: string | null; status: string; email_verified_at: number | null; totp_secret: string | null; totp_enabled_at: number | null } | null;
+      // SECURITY: Per-account lockout bounds password brute force even when the
+      // IP-based limiter is unreliable (proxy header issues). 5 fails => 15 min.
+      if (user && isPasswordLocked(user.id)) {
+        return cors(json({ error: "Too many failed attempts. Please try again in 15 minutes." }, 429), origin);
+      }
       // SECURITY: Always verify a hash to prevent timing-based user enumeration
       // Uses dynamically generated dummy hash with same Argon2id parameters
       const hashToVerify = user ? user.password_hash : DUMMY_PASSWORD_HASH;
@@ -4535,10 +4711,13 @@ _server = Bun.serve({
       if (!valid || !user) {
         // SECURITY: Log failed login attempts for forensics (without revealing if user exists)
         if (user) {
+          recordPasswordFailure(user.id);
           logAuditEvent(user.id, "login_failed", { reason: "invalid_password" }, req);
         }
         return cors(json({ error: "Invalid email or password" }, 401), origin);
       }
+      // Password verified: clear the failed-password lockout counter.
+      resetPasswordFailures(user.id);
       if (user.status === 'archived') {
         return cors(json({ error: "Account is suspended. Contact your administrator." }, 403), origin);
       }
@@ -4674,6 +4853,13 @@ _server = Bun.serve({
       if (ctx && ctx.type === "jwt") {
         logAuditEvent(ctx.userId, "logout", null, req, ctx.orgId);
       }
+      // Revoke the presented JWT so a captured copy cannot outlive logout (a
+      // stateless token would otherwise stay valid until exp). Reads the same
+      // sources getAuthContext does: Authorization: Bearer, else the cookie.
+      const rawAuth = req.headers.get("Authorization");
+      let logoutToken = rawAuth && rawAuth.startsWith("Bearer ") ? rawAuth.slice(7) : null;
+      if (!logoutToken) logoutToken = parseCookies(req)[COOKIE_NAME] || null;
+      if (logoutToken && logoutToken.includes(".")) revokeToken(logoutToken);
       // Clear httpOnly auth cookie
       return logoutResponse(origin);
     }
@@ -5829,31 +6015,50 @@ _server = Bun.serve({
         const localPayment = db.prepare("SELECT * FROM payments WHERE mollie_payment_id = ?")
           .get(paymentId) as any;
 
-        if (!localPayment) {
+        // Recurring payments are created by Mollie's subscription engine and have
+        // NO local payments row; they are handled below via payment.subscriptionId.
+        // Only ignore a payment that is neither known locally nor part of a sub
+        // (otherwise the renewal / failed-charge branches stay dead code).
+        if (!localPayment && !payment.subscriptionId) {
           console.warn(`[cookieproof-api] Webhook for unknown payment: ${paymentId}`);
           return cors(json({ ok: true }), origin);
         }
 
-        // SECURITY: Idempotency check , skip if already processed
-        if (localPayment.status === "paid" && payment.status === "paid") {
-          console.log(`[cookieproof-api] Webhook idempotency: payment ${paymentId} already processed`);
-          return cors(json({ ok: true }), origin);
+        // The paid amount must match the plan price before ANY grant. Never
+        // activate on status alone (defense-in-depth vs amount/currency drift).
+        const amountMatchesPlan = (planRow: { price_cents: number; currency: string } | null): boolean => {
+          if (!planRow) return false;
+          const paidCents = Math.round(parseFloat(payment?.amount?.value ?? "0") * 100);
+          return payment?.amount?.currency === planRow.currency && paidCents >= planRow.price_cents;
+        };
+
+        if (localPayment) {
+          // SECURITY: Idempotency check , skip if already processed
+          if (localPayment.status === "paid" && payment.status === "paid") {
+            console.log(`[cookieproof-api] Webhook idempotency: payment ${paymentId} already processed`);
+            return cors(json({ ok: true }), origin);
+          }
+
+          // Map Mollie status to known internal statuses
+          const KNOWN_PAYMENT_STATUSES = new Set(["paid", "failed", "pending", "canceled", "expired", "open"]);
+          const newStatus = KNOWN_PAYMENT_STATUSES.has(payment.status) ? payment.status : "unknown";
+          db.prepare("UPDATE payments SET status = ?, paid_at = ?, updated_at = ? WHERE id = ?")
+            .run(newStatus, payment.status === "paid" ? now : null, now, localPayment.id);
         }
 
-        // Map Mollie status to known internal statuses
-        const KNOWN_PAYMENT_STATUSES = new Set(["paid", "failed", "pending", "canceled", "expired", "open"]);
-        const newStatus = KNOWN_PAYMENT_STATUSES.has(payment.status) ? payment.status : "unknown";
-        db.prepare("UPDATE payments SET status = ?, paid_at = ?, updated_at = ? WHERE id = ?")
-          .run(newStatus, payment.status === "paid" ? now : null, now, localPayment.id);
-
         // If this is a first payment and it succeeded, activate subscription
-        if (payment.status === "paid" && localPayment.subscription_id) {
+        if (localPayment && payment.status === "paid" && localPayment.subscription_id) {
           const sub = db.prepare("SELECT * FROM subscriptions WHERE id = ?")
             .get(localPayment.subscription_id) as any;
 
           if (sub && sub.status === "pending") {
-            const plan = db.prepare("SELECT interval FROM pricing_plans WHERE id = ?")
-              .get(sub.plan_id) as { interval: string } | null;
+            const plan = db.prepare("SELECT interval, price_cents, currency FROM pricing_plans WHERE id = ?")
+              .get(sub.plan_id) as { interval: string; price_cents: number; currency: string } | null;
+            // Bind the Mollie-verified amount to the plan price before activating.
+            if (!amountMatchesPlan(plan)) {
+              console.error(`[cookieproof-api] Payment ${paymentId} amount/currency mismatch vs plan ${sub.plan_id}; refusing to activate`);
+              return cors(json({ ok: true }), origin);
+            }
             const periodMs = plan?.interval === "year" ? 365 * 24 * 3600 * 1000 : 30 * 24 * 3600 * 1000;
             const periodEnd = now + periodMs;
 
@@ -5912,26 +6117,34 @@ _server = Bun.serve({
           }
         }
 
-        // Handle subscription payments (recurring) , with idempotency check
+        // Handle subscription payments (recurring). Reachable now that a recurring
+        // payment (no local row) no longer early-returns above.
         if (payment.status === "paid" && payment.subscriptionId) {
           const sub = db.prepare("SELECT * FROM subscriptions WHERE mollie_subscription_id = ?")
             .get(payment.subscriptionId) as any;
 
           if (sub) {
-            const plan = db.prepare("SELECT interval FROM pricing_plans WHERE id = ?")
-              .get(sub.plan_id) as { interval: string } | null;
-            const periodMs = plan?.interval === "year" ? 365 * 24 * 3600 * 1000 : 30 * 24 * 3600 * 1000;
-
-            // Only update period if the payment is newer than current period start
-            if (!sub.current_period_start || now > sub.current_period_start) {
+            // Idempotency keyed on the Mollie payment id: if we already recorded this
+            // payment, do not extend the period again (the old now>period_start
+            // heuristic was always true, so replays re-extended indefinitely).
+            const seen = db.prepare("SELECT id FROM payments WHERE mollie_payment_id = ?").get(paymentId) as { id: string } | null;
+            const plan = db.prepare("SELECT interval, price_cents, currency FROM pricing_plans WHERE id = ?")
+              .get(sub.plan_id) as { interval: string; price_cents: number; currency: string } | null;
+            if (seen) {
+              console.log(`[cookieproof-api] Recurring payment ${paymentId} already processed (idempotent)`);
+            } else if (!amountMatchesPlan(plan)) {
+              console.error(`[cookieproof-api] Recurring payment ${paymentId} amount/currency mismatch vs plan ${sub.plan_id}; not renewing`);
+            } else {
+              const periodMs = plan?.interval === "year" ? 365 * 24 * 3600 * 1000 : 30 * 24 * 3600 * 1000;
               db.prepare(`
-                UPDATE subscriptions SET
-                  current_period_start = ?,
-                  current_period_end = ?,
-                  updated_at = ?
-                WHERE id = ?
+                INSERT INTO payments (id, org_id, subscription_id, mollie_payment_id, amount_cents, currency, status, description, paid_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'paid', ?, ?, ?, ?)
+              `).run(randomUUID(), sub.org_id, sub.id, paymentId, plan!.price_cents, plan!.currency, "Recurring subscription payment", now, now, now);
+              db.prepare(`
+                UPDATE subscriptions SET status = 'active', current_period_start = ?, current_period_end = ?, updated_at = ? WHERE id = ?
               `).run(now, now + periodMs, now, sub.id);
-
+              // Re-activate the org (clears any grace left by a prior failed charge).
+              db.prepare("UPDATE orgs SET plan = 'active', grace_ends_at = NULL WHERE id = ?").run(sub.org_id);
               console.log(`[cookieproof-api] Renewed subscription ${sub.id} until ${new Date(now + periodMs).toISOString()}`);
             }
           }
@@ -6297,6 +6510,12 @@ _server = Bun.serve({
 
     // ---- POST /api/settings/domains -----------------------------------------
     if (req.method === "POST" && path === "/api/settings/domains") {
+      // Only an org owner may add an allowed origin. These origins feed the shared
+      // CORS allow-list, so a non-owner (or any free-tier member) must not be able
+      // to register arbitrary origins.
+      if (authCtx.type === "jwt" && authCtx.role !== "owner") {
+        return cors(json({ error: "Only the owner can manage allowed domains" }, 403), origin);
+      }
       try {
         const contentType = req.headers.get("Content-Type") || "";
         if (!contentType.includes("application/json")) {
@@ -6990,17 +7209,10 @@ _server = Bun.serve({
       }
 
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10_000);
-
-        const res = await fetch(webhook.url, {
-          method: "POST",
-          headers,
-          body,
-          redirect: "manual",
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
+        // SSRF-guarded: the test path previously fetched the stored URL with NO
+        // private-IP check at all. guardedWebhookFetch resolves + rejects internal
+        // resolved IPs and pins the connection, closing the rebinding oracle.
+        const res = await guardedWebhookFetch(webhook.url, { headers, body });
 
         db.prepare("UPDATE webhooks SET last_triggered_at = ?, last_status = ? WHERE id = ?")
           .run(Date.now(), res.status, webhookId);
@@ -7920,7 +8132,12 @@ _server = Bun.serve({
       data = _body.data;
 
       const smtpHost = typeof data.smtp_host === "string" ? data.smtp_host.trim().slice(0, 255) : "";
-      const smtpPort = typeof data.smtp_port === "number" ? Math.min(Math.max(data.smtp_port, 1), 65535) : 587;
+      // Restrict to the standard mail-submission ports; the full 1-65535 range
+      // let an agency user point the SMTP dialer at arbitrary internal services.
+      const ALLOWED_SMTP_PORTS = [25, 465, 587, 2525];
+      const reqSmtpPort = typeof data.smtp_port === "number" ? data.smtp_port : 587;
+      if (!ALLOWED_SMTP_PORTS.includes(reqSmtpPort)) return cors(json({ error: "smtp_port must be one of 25, 465, 587, 2525" }, 400), origin);
+      const smtpPort = reqSmtpPort;
       const smtpUser = typeof data.smtp_user === "string" ? data.smtp_user.trim().slice(0, 255) : "";
       const smtpFrom = typeof data.smtp_from === "string" ? data.smtp_from.trim().toLowerCase().slice(0, 255) : "";
 
@@ -7932,6 +8149,12 @@ _server = Bun.serve({
       const existing = db.prepare("SELECT user_id, smtp_pass FROM agency_smtp WHERE user_id = ?").get(authCtx.userId) as { user_id: string; smtp_pass: string } | null;
       // Keep existing password if not provided in update; encrypt new passwords before storing
       const rawPass = typeof data.smtp_pass === "string" && data.smtp_pass ? data.smtp_pass.slice(0, 500) : "";
+      // Fail closed: never persist an SMTP password in plaintext. encryptSmtpPass()
+      // silently returns the cleartext when no key is configured, so guard here and
+      // refuse the write instead of storing recoverable mail-server credentials.
+      if (rawPass && !smtpEncryptionKeyBuf) {
+        return cors(json({ error: "SMTP credential encryption is not configured on this server (set SMTP_ENCRYPTION_KEY). Refusing to store the password in plaintext." }, 503), origin);
+      }
       const smtpPass = rawPass ? encryptSmtpPass(rawPass) : (existing?.smtp_pass || "");
       if (existing) {
         db.prepare("UPDATE agency_smtp SET smtp_host = ?, smtp_port = ?, smtp_user = ?, smtp_pass = ?, smtp_from = ?, updated_at = ? WHERE user_id = ?")
@@ -8899,8 +9122,10 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
         return cors(json({ error: "You are already on this plan." }, 400), origin);
       }
 
-      // If Mollie is not configured, mark as active immediately (dev/testing mode)
-      if (!MOLLIE_API_KEY) {
+      // Dev-only auto-activate: requires BOTH a non-production env AND an explicit
+      // opt-in flag. A missing Mollie key in production must never grant a free plan
+      // (the prod boot guard already refuses to start without it; this is layered).
+      if (!MOLLIE_API_KEY && process.env.NODE_ENV !== "production" && process.env.COOKIEPROOF_DEV_BILLING === "1") {
         const periodEnd = now + (plan.interval === "year" ? 365 * 24 * 3600 * 1000 : 30 * 24 * 3600 * 1000);
         db.prepare(`
           UPDATE subscriptions SET status = 'active', current_period_start = ?, current_period_end = ?, updated_at = ?
@@ -8924,6 +9149,13 @@ ${pdfRows.map((r: any) => `<tr><td>${escHtml(r.domain)}</td><td>${escHtml((r.url
           status: "active",
           message: "Subscription activated (Mollie not configured - dev mode)",
         }), origin);
+      }
+
+      // Mollie not configured and not an explicit dev-billing run: never fall through
+      // to a free grant. Roll back the pending subscription and refuse cleanly.
+      if (!MOLLIE_API_KEY) {
+        db.prepare("DELETE FROM subscriptions WHERE id = ?").run(subId);
+        return cors(json({ error: "Billing is not configured." }, 503), origin);
       }
 
       // Create Mollie payment for first charge
