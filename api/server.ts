@@ -1,3 +1,14 @@
+// Flare error reporting (Sentry-compatible ingest). Import first so the SDK
+// module is evaluated before the rest of the app. When FLARE_DSN is unset the
+// SDK is never initialized and every capture call is a no-op.
+import * as Sentry from "@sentry/bun";
+if (process.env.FLARE_DSN) {
+  Sentry.init({
+    dsn: process.env.FLARE_DSN,
+    release: process.env.COOKIEPROOF_VERSION || "dev",
+  });
+}
+
 import { Database } from "bun:sqlite";
 import { randomUUID, createHash, createHmac, randomBytes, timingSafeEqual, createCipheriv, createDecipheriv } from "crypto";
 import { scanHtml } from "./scanner/scanner.js";
@@ -9578,10 +9589,12 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 // Global error handlers , prevent silent crashes
 process.on("uncaughtException", (err: any) => {
+  Sentry.captureException(err); // no-op when FLARE_DSN is unset
   console.error("[cookieproof-api] UNCAUGHT EXCEPTION:", err);
   gracefulShutdown("uncaughtException", 1);
 });
 process.on("unhandledRejection", (reason: any) => {
   // Log but don't exit , async errors in email/webhook calls shouldn't crash the server
+  Sentry.captureException(reason); // no-op when FLARE_DSN is unset
   console.error("[cookieproof-api] UNHANDLED REJECTION:", reason);
 });

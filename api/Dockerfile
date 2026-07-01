@@ -5,6 +5,12 @@ RUN apk add --no-cache su-exec && \
     addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app
+
+# Flare error reporting SDK, pinned to the version in the repo root bun.lock.
+# Must be baked into the image: the container runs with a read-only root
+# filesystem, so Bun's runtime auto-install cannot fetch it on boot.
+RUN bun add --exact @sentry/bun@10.63.0
+
 COPY server.ts sharedsecret.ts entrypoint.sh ./
 COPY scanner/ ./scanner/
 RUN chmod +x entrypoint.sh

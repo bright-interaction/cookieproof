@@ -105,5 +105,8 @@
   "sideEffects": [
     "dist/cookieproof.esm.js",
     "dist/cookieproof.umd.js"
-  ]
+  ],
+  "dependencies": {
+    "@sentry/bun": "^10.63.0"
+  }
 }
