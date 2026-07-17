@@ -6,6 +6,39 @@ if (process.env.FLARE_DSN) {
   Sentry.init({
     dsn: process.env.FLARE_DSN,
     release: process.env.COOKIEPROOF_VERSION || "dev",
+    sendDefaultPii: false,
+    // @sentry/bun's bunServerIntegration attaches the request's headers + cookies
+    // to error events, and its default deny-list is only applied to spans, never
+    // to event.request. Without this scrub an unhandled 500 on an authenticated
+    // request ships the live ce_session JWT, the Authorization bearer, the CSRF
+    // token, and URL-embedded invite/reset tokens to the shared estate Flare
+    // store, where anyone with Flare read access could replay them. Strip them
+    // before the event leaves the process.
+    beforeSend(event) {
+      const req = event.request;
+      if (req) {
+        delete (req as Record<string, unknown>).cookies;
+        delete (req as Record<string, unknown>).data; // request body may carry passwords
+        const headers = req.headers as Record<string, unknown> | undefined;
+        if (headers) {
+          for (const key of Object.keys(headers)) {
+            const l = key.toLowerCase();
+            if (
+              l === "cookie" || l === "set-cookie" || l === "authorization" ||
+              l.includes("auth") || l.includes("token") || l.includes("session") ||
+              l.includes("secret") || l.includes("csrf") || l.includes("api-key")
+            ) {
+              delete headers[key];
+            }
+          }
+        }
+        if (typeof req.url === "string") {
+          req.url = req.url.replace(/\/(invite|reset|verify)\/[^/?#]+/gi, "/$1/[redacted]");
+        }
+      }
+      if (event.user) delete event.user.ip_address;
+      return event;
+    },
   });
 }
 
