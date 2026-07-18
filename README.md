@@ -338,6 +338,17 @@ cc.configure({
 
 The endpoint must return JSON: `{ "requiresConsent": true | false }`. HTTPS is required. If the endpoint fails or is unreachable, the banner is shown (fail-safe).
 
+## Self-hosting
+
+Copy [.env.example](./.env.example) to `.env`, fill the values (JWT_SECRET is
+required), then `docker compose -f deploy/docker-compose.yml up -d`. The web
+container serves the widget + dashboard on port 8080; edit `nginx.conf`'s
+`server_name` to your own domain.
+
 ## License
 
-MIT
+CookieProof is fair-code, licensed under the CookieProof Sustainable Use
+License: self-host free, use it commercially for your own business and your
+own clients' sites, serve every visitor; you may not resell it as a hosted
+consent-management service. Versions up to 2026-04-25 were MIT and those
+copies remain MIT. See [LICENSE](./LICENSE) and [LICENSING.md](./LICENSING.md).

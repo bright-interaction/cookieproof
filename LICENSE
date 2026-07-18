@@ -1,47 +1,137 @@
-MIT License
+CookieProof Sustainable Use License
 
-Copyright (c) 2025-present Bright Interaction
+Version 1.0
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This is a "fair-code" license (https://faircode.io). The source is open
+and free to read, run, and modify. It is NOT an OSI "open source" license,
+because it places one limit on commercial use: you may not resell
+CookieProof itself or run it as a service for third parties. The
+plain-English summary below is not part of the legal terms; the terms that
+follow it govern.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Versions of CookieProof published on or before 2026-04-25 were released
+under the MIT License; copies obtained under that license remain governed
+by it. This and all later versions are licensed as follows.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+------------------------------------------------------------------------
+Plain-English summary (informational, not the license)
 
---- Enterprise Edition Exception ---
+You CAN:
+  - Run CookieProof on your own servers / VPS, for free, forever.
+  - Use it for your own business, internally and commercially.
+  - Serve the consent banner to every visitor of your own websites. That
+    is what a consent tool is for, and it is expressly permitted.
+  - Use it to manage consent for your own clients' websites (e.g. an
+    agency running consent for the sites it builds and operates).
+  - Read, modify, and self-distribute the source, keeping this license.
 
-This MIT License does NOT apply to:
+You CANNOT, without a separate commercial agreement from the Licensor:
+  - Sell CookieProof, or offer it to third parties as a hosted or managed
+    service whose value derives substantially from CookieProof's own
+    functionality (i.e. a competing consent-management SaaS).
+  - Remove or obscure the licensing, copyright, or attribution notices,
+    or use the "CookieProof" or "Bright Interaction" names or logos for
+    a fork without permission.
+------------------------------------------------------------------------
 
-1. Code within the "ee/" directory, which is governed by the CookieProof
-   Enterprise License (see ee/LICENSE).
+1. Definitions
 
-2. Enterprise Features embedded in other source files, identified by code
-   paths gated behind the COOKIEPROOF_LICENSE_KEY environment variable.
-   These features include, but are not limited to:
+   "Software" means the CookieProof source code, binaries, and
+   documentation distributed under this license.
 
-   - API routes under /api/agency/*, /api/billing/*, /api/admin/*, /api/team/*
-   - Multi-tenant organization management
-   - Agency dashboard and white-label branding
-   - Billing and subscription management
-   - Team management and role-based invitations
-   - Admin panel and super-admin controls
-   - Scheduled reports and PDF generation
-   - Custom SMTP configuration per organization
-   - Custom domain management
+   "Licensor" means Bright Interaction, the copyright holder.
 
-   These features are proprietary and subject to the CookieProof Enterprise
-   License (see ee/LICENSE), regardless of which source file they appear in.
+   "You" means the individual or entity exercising the rights below.
 
-For questions about licensing, contact: contact@brightinteraction.com
+   "Your Customers" means third parties to whom You provide professional
+   services (such as web development, hosting, marketing, or compliance
+   services) where the primary thing You provide is Your service, not
+   the Software itself.
+
+   "Visitors" means persons whose browsers load, interact with, or are
+   recorded by the Software's consent surfaces on websites operated by
+   You or Your Customers.
+
+   "Provide a Competing Service" means making the Software, or a modified
+   version of it, available to third parties as a hosted, managed, or
+   white-labeled product or service whose value derives substantially from
+   the Software's own functionality, including any offering that competes
+   with a hosted CookieProof product offered by the Licensor.
+
+2. Grant
+
+   Subject to the conditions in Sections 3 and 4, the Licensor grants You
+   a worldwide, royalty-free, non-exclusive, non-sublicensable license to
+   use, copy, modify, and distribute the Software for any purpose,
+   including commercial purposes.
+
+3. Permitted commercial use
+
+   For the avoidance of doubt, the following are expressly permitted:
+
+   (a) running the Software for Your own internal business operations;
+
+   (b) serving the Software's consent banner, APIs, and records to
+       Visitors free of charge. Visitors interacting with consent
+       surfaces on sites You or Your Customers operate does not make
+       Your deployment a service provided to them;
+
+   (c) using the Software to configure, serve, and record consent for
+       Your Customers' websites as part of a professional service,
+       including hosting a Customer-specific deployment on their behalf;
+
+   (d) distributing the Software, modified or unmodified, free of charge,
+       provided this license and all notices travel with it.
+
+4. Conditions and limitations
+
+   (a) You may not Provide a Competing Service without a separate
+       commercial license from the Licensor.
+
+   (b) You may not sell the Software as a product where the value of the
+       sale derives substantially from the Software's own functionality.
+
+   (c) You may not remove, alter, or obscure any licensing, copyright, or
+       attribution notice in the Software, and You must ensure that anyone
+       who receives any part of the Software from You also receives a copy
+       of this license.
+
+   (d) "CookieProof" and "Bright Interaction", and associated logos, are
+       trademarks of the Licensor. This license grants no rights to use
+       those marks. A fork must be clearly renamed and must not imply
+       endorsement by or affiliation with the Licensor.
+
+5. Patents
+
+   The Licensor grants You a license to any patent claims it can license
+   that are necessarily infringed by the Software, limited to the rights
+   granted in Section 2. This patent license terminates if You bring a
+   patent claim alleging the Software infringes a patent.
+
+6. Termination
+
+   If You violate this license, Your rights under it terminate
+   automatically. They may be reinstated by the Licensor in writing. On
+   termination You must stop using and distributing the Software, though
+   copies already distributed in compliance remain licensed.
+
+7. Commercial licenses
+
+   If You want to do something this license does not permit, including
+   Providing a Competing Service, contact the Licensor at
+   licensing@brightinteraction.com for a separate commercial license.
+
+8. Disclaimer of warranty
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+9. Limitation of liability
+
+   IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+   OTHER LIABILITY, WHETHER IN CONTRACT, TORT, OR OTHERWISE, ARISING FROM,
+   OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+   IN THE SOFTWARE.
+
+Copyright (c) Bright Interaction. All rights reserved.

@@ -1,0 +1,79 @@
+# Generic self-host compose for CookieProof: nginx web (widget + dashboard),
+# Bun API, Gotenberg (PDF reports). No external networks; put your own reverse
+# proxy (or a ports mapping) in front of `web`. Config comes from ../.env
+# (see ../.env.example). Note: nginx.conf's server_name is the vendor's; change
+# it to your own domain.
+services:
+  web:
+    build: ..
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    read_only: true
+    tmpfs:
+      - /tmp:size=16M,mode=1777,noexec,nosuid,nodev
+      - /var/cache/nginx:size=32M,mode=755
+      - /var/run:size=1M,mode=755
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - internal
+
+  api:
+    build: ../api
+    restart: unless-stopped
+    depends_on:
+      - gotenberg
+    env_file:
+      - ../.env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3100/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    volumes:
+      - cookieproof-data:/data
+    networks:
+      - internal
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    networks:
+      - internal
+    read_only: true
+    tmpfs:
+      - /tmp:size=256M,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  cookieproof-data:
+
+networks:
+  internal:
