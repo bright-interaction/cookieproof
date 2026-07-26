@@ -73,10 +73,10 @@
     "node": ">=18"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "^1.62.0",
     "@rollup/plugin-terser": "^0.4.4",
     "@rollup/plugin-typescript": "^12.3.0",
-    "happy-dom": "^20.10.6",
+    "happy-dom": "^20.11.1",
     "rollup": "^4.62.2",
     "http-server": "^14.1.1",
     "tslib": "^2.8.1",
@@ -84,7 +84,9 @@
     "vitest": "^4.1.10"
   },
   "overrides": {
-    "serialize-javascript": ">=7.0.3"
+    "serialize-javascript": ">=7.0.3",
+    "postcss": "^8.5.18",
+    "picomatch": "^2.3.2"
   },
   "peerDependencies": {
     "react": ">=17",
@@ -107,6 +109,6 @@
     "dist/cookieproof.umd.js"
   ],
   "dependencies": {
-    "@sentry/bun": "^10.65.0"
+    "@sentry/bun": "^10.68.0"
   }
 }
