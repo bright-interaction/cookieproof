@@ -3,6 +3,9 @@ import type { CookieConsentConfig, ConsentRecord, ConsentEventDetail } from '../
 
 // Ensure the custom element is registered in the browser
 if (typeof window !== 'undefined') {
+  // @ts-ignore dist/ is a build artifact, so it does not exist while the sources are
+  // typechecked. Nothing is read from this import: it exists purely for the side
+  // effect of defining <cookie-consent>, so resolving its types would buy nothing.
   import('../dist/cookieproof.esm.js');
 }
 

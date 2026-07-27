@@ -87,7 +87,11 @@ function applyCopyOverrides(config: CookieConsentConfig, copy: NonNullable<Embed
   if (!config.translations[lang]) {
     config.translations[lang] = { banner: {}, preferences: {}, categories: {}, trigger: {} } as never;
   }
-  const t = config.translations[lang] as Record<string, Record<string, string>>;
+  // TranslationStrings is a fixed-shape interface, not an index signature, so a
+  // direct cast is rejected as unrelated. The banner/preferences/categories keys
+  // written below are all real sections of it; going through unknown is the cast
+  // TypeScript asks for, and matches the `as never` literal three lines up.
+  const t = config.translations[lang] as unknown as Record<string, Record<string, string>>;
   if (!t.banner) t.banner = {} as Record<string, string>;
   if (copy.title) t.banner.title = copy.title;
   if (copy.description) t.banner.description = copy.description;
