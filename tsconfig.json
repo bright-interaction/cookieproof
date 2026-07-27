@@ -1,5 +1,8 @@
 {
   "compilerOptions": {
+    // wrappers/react.tsx is JSX. Without this tsc reports TS17004 and the
+    // wrappers were effectively never typechecked.
+    "jsx": "react-jsx",
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
