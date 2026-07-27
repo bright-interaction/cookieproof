@@ -5,6 +5,11 @@ import type { CookieConsentConfig, ConsentRecord, ConsentEventDetail } from '../
 let registered = false;
 if (typeof window !== 'undefined' && !registered) {
   registered = true;
+  // Side-effect-only import: it registers the <cookie-consent> custom element and no
+  // export is read. The built bundle ships no .d.ts (package `types` points at
+  // dist/src/index.d.ts instead), so tsc reports TS7016 for a module it cannot describe.
+  // Nothing here depends on its shape.
+  // @ts-expect-error the built bundle has no declaration file; this import is for effect
   import('../dist/cookieproof.esm.js');
 }
 
@@ -15,10 +20,24 @@ export interface CookieConsentProps extends CookieConsentConfig {
   style?: React.CSSProperties;
 }
 
-declare global {
+// <cookie-consent> is a custom element, so JSX has to be told it exists.
+//
+// This augments the 'react' MODULE rather than a global JSX namespace. React 19 nests JSX
+// inside the React namespace and no longer declares a global one, so the previous
+// `declare global` form silently did nothing and this wrapper reported TS2339 where the
+// element is used below. It went unnoticed because wrappers/ was never actually
+// typechecked: tsconfig had no `jsx` option, so tsc failed earlier with TS17004, and the
+// publish gate only compiled tests rather than running anything.
+declare module 'react' {
   namespace JSX {
     interface IntrinsicElements {
-      'cookie-consent': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>;
+      // Inline import() types on purpose. Naming these via an import statement trades
+      // TS4033 (private name) for TS6133 (unused import) and back again; an inline
+      // import type resolves without either.
+      'cookie-consent': import('react').DetailedHTMLProps<
+        import('react').HTMLAttributes<HTMLElement>,
+        HTMLElement
+      >;
     }
   }
 }

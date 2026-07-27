@@ -87,7 +87,10 @@ function applyCopyOverrides(config: CookieConsentConfig, copy: NonNullable<Embed
   if (!config.translations[lang]) {
     config.translations[lang] = { banner: {}, preferences: {}, categories: {}, trigger: {} } as never;
   }
-  const t = config.translations[lang] as Record<string, Record<string, string>>;
+  // Via unknown on purpose: TranslationStrings is a shaped interface with no index
+  // signature, so asserting straight to a Record is unsound and tsc rejects it. This
+  // block only ever writes known keys (banner/preferences/categories/trigger).
+  const t = config.translations[lang] as unknown as Record<string, Record<string, string>>;
   if (!t.banner) t.banner = {} as Record<string, string>;
   if (copy.title) t.banner.title = copy.title;
   if (copy.description) t.banner.description = copy.description;

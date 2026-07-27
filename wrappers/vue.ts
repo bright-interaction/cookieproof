@@ -3,6 +3,11 @@ import type { CookieConsentConfig, ConsentRecord, ConsentEventDetail } from '../
 
 // Ensure the custom element is registered in the browser
 if (typeof window !== 'undefined') {
+  // Side-effect-only import: it registers the <cookie-consent> custom element and no
+  // export is read. The built bundle ships no .d.ts (package `types` points at
+  // dist/src/index.d.ts instead), so tsc reports TS7016 for a module it cannot describe.
+  // Nothing here depends on its shape.
+  // @ts-expect-error the built bundle has no declaration file; this import is for effect
   import('../dist/cookieproof.esm.js');
 }
 
