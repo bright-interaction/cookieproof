@@ -40,6 +40,39 @@ if (process.env.FLARE_DSN) {
       return event;
     },
   });
+  startFlareHeartbeat("cookieproof");
+}
+
+// Liveness beacon, matching the Go services' internal/flarereport heartbeat
+// (same 2-minute interval, same info level, same "service-up:<name>" message
+// and ["service-up", name] fingerprint) so every project looks the same in
+// Flare regardless of the language it is written in.
+//
+// Without this, a bun service that captures ONLY exceptions reports nothing at
+// all while healthy, which is indistinguishable from dead or misconfigured. It
+// also defeats Flare's silence rule outright: silenceReason() returns "" when
+// the project has fewer than `threshold` events in 24h, so a project that has
+// NEVER reported can never trip silence detection and is invisible forever.
+// Measured 2026-07-31: CookieProof and border-tracer-api had 0 events in 7 days
+// with a perfectly working DSN, SDK and ingest (verified by a synthetic probe
+// that landed correctly). They were healthy. Nothing could have told us.
+//
+// info level never pages: Flare's ingest treats info/debug as non-pageable, so
+// this feeds the activity baseline without ever firing a new-issue alert. The
+// beforeSend scrubber above is a no-op for it (no request, no user).
+// Set FLARE_HEARTBEAT=off to disable, same switch as the Go side.
+function startFlareHeartbeat(service: string) {
+  if (process.env.FLARE_HEARTBEAT === "off") return;
+  const emit = () => {
+    Sentry.withScope((scope) => {
+      scope.setLevel("info");
+      scope.setFingerprint(["service-up", service]);
+      Sentry.captureMessage(`service-up:${service}`);
+    });
+  };
+  emit();
+  // unref() so a pending beacon can never hold the process open at shutdown.
+  setInterval(emit, 2 * 60 * 1000).unref();
 }
 
 import { Database } from "bun:sqlite";
